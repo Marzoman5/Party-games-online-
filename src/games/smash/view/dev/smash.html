@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smash Party — engine dev</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0b1a; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      #dev { position: fixed; left: 8px; top: 8px; z-index: 99; font: 12px monospace; color: #9fb; background: rgba(0,0,0,.5); padding: 4px 6px; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="dev"></div>
+    <script type="module" src="./smash.ts"></script>
+  </body>
+</html>
