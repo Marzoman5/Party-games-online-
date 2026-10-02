@@ -73,9 +73,7 @@ export class TipSystem {
       events.on('kart:boost', (e) => {
         if (e.source === 'drift') this.tip(e.kartId, 'miniturbo', 'Nice! Mini-turbo!', true);
       }),
-      events.on('race:wrongWay', (e) => {
-        if (e.wrongWay) this.tip(e.kartId, 'wrongway', 'Wrong way! Turn around', true);
-      }),
+      // Wrong-way is already shown by the HUD's big WRONG WAY banner; no tip (they overlapped).
     );
     // 'kart:trick' is an ENGINE-B addition; subscribe loosely so this compiles either way.
     const loose = events as unknown as {

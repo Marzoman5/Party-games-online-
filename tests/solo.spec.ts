@@ -16,15 +16,9 @@ test('1-player keyboard race works end to end', async ({ page }) => {
   expect((await partyState(page)).soloActive).toBe(true);
   // Party overlays get out of the way.
   await expect(page.getByTestId('screen-title')).toHaveCount(0);
-  // KNOWN BUG (reported): the same ENTER keystroke that opens solo mode is latched by the engine's
-  // InputManager and confirms the character select on the next frame, skipping straight to track
-  // select. Record it and go back with Escape so the rest of the keyboard flow is still covered.
-  await expect(page.locator('.panel-chars.active, .panel-tracks.active')).toBeVisible({ timeout: 15_000 });
+  // The ENTER that opens solo mode must not also confirm character select (regression check).
   await sleep(1500);
-  if (await page.locator('.panel-tracks.active').isVisible()) {
-    test.info().annotations.push({ type: 'bug', description: 'ENTER on the party title skips solo character select (lands on track select)' });
-    await page.keyboard.press('Escape');
-  }
+  await expect(page.locator('.panel-tracks.active')).toHaveCount(0);
   await expect(page.locator('.panel-chars.active')).toBeVisible({ timeout: 15_000 });
   await settle(page, 3);
   await shot(page, '09-host-solo-character-select-laptop.jpg');

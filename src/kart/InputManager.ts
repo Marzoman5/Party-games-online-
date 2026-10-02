@@ -159,6 +159,11 @@ export class InputManager {
     return s;
   }
 
+  /** Forget key presses not yet consumed (e.g. the Enter that opened a menu). */
+  clearEdges(): void {
+    this.pressed.clear();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

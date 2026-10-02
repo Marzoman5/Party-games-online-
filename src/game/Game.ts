@@ -515,6 +515,8 @@ export class Game implements IGameHost {
       this.backdrop.attach(this.scene, this.camera, this.renderer);
       this.backdropAttached = true;
     }
+    // The key that opened this menu (Enter on the party title) must not also confirm it.
+    this.input.clearEdges();
     this.mainMenu.show(panel);
     this.setPhase('soloMenu');
     this.playMusic('menu');
