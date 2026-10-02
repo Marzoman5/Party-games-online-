@@ -1,15 +1,21 @@
-/** App shell: picks the view for the current host screen, corner status, banners, overlays. */
+/**
+ * App shell (the controller framework): picks the view for the current host screen, mounts
+ * the active game's controller layout (kart / fighter) for in-game screens, corner status,
+ * banners, rotate overlay, gestures, wake lock + fullscreen. See framework/layout.ts.
+ */
 import { SLOT_COLORS, type ServerToPhone } from '../net/protocol';
-import { controls } from './controls';
+import { layoutForGame, type ControllerLayout, type LayoutId } from './framework/layout';
 import { haptic } from './haptics';
 import { net } from './net';
 import { profileOnJoined, profileOnState } from './profile';
 import { onSettings, settings } from './settings';
-import { currentView, setState, state, subscribe, type ViewId } from './store';
+import { activeGame, currentView, setState, state, subscribe, type ViewId } from './store';
 import { tilt } from './tilt';
 import { requestFullscreen, requestWakeLock, setWantLandscape } from './system';
 import { button, h, setText, show, toggleClass } from './ui';
+import { ByGameView } from './screens/byGame';
 import { ControllerView } from './screens/controller';
+import { FighterView } from './screens/fighter';
 import { ErrorView, JoinView } from './screens/join';
 import { LoadingView } from './screens/loading';
 import { LobbyView } from './screens/lobby';
@@ -17,16 +23,26 @@ import { PausedView } from './screens/paused';
 import { ResultsView } from './screens/results';
 import { SettingsPanel } from './screens/settingsPanel';
 import { SetupView } from './screens/setup';
+import { SmashSetupView } from './screens/smashSetup';
 import type { View } from './screens/view';
 
-const CONTROLLER_VIEWS: ViewId[] = ['race', 'tutorial'];
-const CLEAR_RACE_ON: string[] = ['loading', 'lobby', 'setup', 'tutorial', 'title', 'waiting'];
+/** Screens that show a controller layout (inputs live). */
+export const CONTROLLER_VIEWS: ViewId[] = ['race', 'tutorial', 'sandbox'];
+const CLEAR_RACE_ON: string[] = ['loading', 'lobby', 'setup', 'tutorial', 'title', 'waiting', 'sandbox'];
+
+/** Layout registry: a third game adds its factory here + a LAYOUT_FOR_GAME entry. */
+const LAYOUT_FACTORIES: Record<LayoutId, () => ControllerLayout> = {
+  kart: () => new ControllerView(),
+  fighter: () => new FighterView(),
+};
 
 export class App {
   readonly root: HTMLElement;
   private stage: HTMLElement;
   private views: Record<string, View>;
-  private controller: ControllerView;
+  private layouts = new Map<LayoutId, ControllerLayout>();
+  /** Layout of the active game (mounted while on a controller screen). */
+  layoutId: LayoutId = 'kart';
   private current: View | null = null;
   private currentId: ViewId | null = null;
   private dot: HTMLElement;
@@ -42,7 +58,6 @@ export class App {
   constructor(root: HTMLElement) {
     this.root = root;
     const lobby = new LobbyView();
-    this.controller = new ControllerView();
     this.views = {
       join: new JoinView(),
       error: new ErrorView(),
@@ -50,10 +65,8 @@ export class App {
       title: lobby,
       lobby,
       waiting: lobby,
-      setup: new SetupView(),
+      setup: new ByGameView({ kart: new SetupView(), smash: new SmashSetupView() }),
       loading: new LoadingView(),
-      race: this.controller,
-      tutorial: this.controller,
       paused: new PausedView(),
       results: new ResultsView(),
     };
@@ -84,13 +97,13 @@ export class App {
     show(this.rotate, false);
 
     root.append(h('div', { class: 'bg' }), this.stage, corner, this.hostBanner, this.connBanner, this.rotate, this.settingsPanel.el);
-    this.stage.append(this.controller.el);
-    show(this.controller.el, false);
+    // The kart layout exists from the start (default game, pre-hub hosts).
+    this.getLayout('kart');
 
     net.onMessage = (m) => this.onMessage(m);
     subscribe(() => this.render());
     onSettings(() => {
-      this.controller.layout();
+      for (const l of this.layouts.values()) l.layout();
       this.render();
     });
     window.addEventListener('resize', () => this.render());
@@ -107,8 +120,16 @@ export class App {
         break;
       case 'state': {
         const prev = state.phone?.screen;
+        const prevGame = state.phone?.game;
         const patch: Partial<typeof state> = { phone: m };
-        if (prev !== m.screen && CLEAR_RACE_ON.includes(m.screen)) patch.race = null;
+        if (prev !== m.screen && CLEAR_RACE_ON.includes(m.screen)) {
+          patch.race = null;
+          patch.fight = null;
+        }
+        if (prevGame !== m.game) {
+          patch.race = null;
+          patch.fight = null;
+        }
         profileOnState(m);
         setState(patch);
         break;
@@ -116,43 +137,67 @@ export class App {
       case 'race':
         setState({ race: m, raceAt: performance.now() });
         break;
+      case 'fight':
+        setState({ fight: m, fightAt: performance.now() });
+        break;
       case 'fx':
-        this.controller.fx(m);
+        this.getLayout(layoutForGame(activeGame())).fx(m);
         break;
       default:
         break;
     }
   }
 
+  getLayout(id: LayoutId): ControllerLayout {
+    let l = this.layouts.get(id);
+    if (!l) {
+      l = LAYOUT_FACTORIES[id]();
+      this.layouts.set(id, l);
+    }
+    return l;
+  }
+
+  /** Release every held input of every layout (blur, background, rotate, game swap). */
+  releaseAll(): void {
+    for (const l of this.layouts.values()) l.input.releaseAll();
+  }
+
   render(): void {
     const v = currentView();
-    const view = this.views[v];
+    const isCtl = CONTROLLER_VIEWS.includes(v);
+    const lid = layoutForGame(state.phone?.game);
+    if (lid !== this.layoutId) {
+      // Game switched while connected: drop every held finger, swap instantly.
+      this.releaseAll();
+      this.layoutId = lid;
+    }
+    const view: View = isCtl ? this.getLayout(lid) : this.views[v];
     if (view !== this.current) {
       if (this.current) {
         this.current.leave?.();
-        if (this.current === this.controller) show(this.controller.el, false);
-        else this.current.el.remove();
+        this.current.el.remove();
       }
       this.current = view;
-      if (view === this.controller) show(this.controller.el, true);
-      else this.stage.append(view.el);
+      this.stage.append(view.el);
       view.enter?.(v);
       this.currentId = null;
     }
     if (this.currentId !== v) {
       this.currentId = v;
-      setWantLandscape(CONTROLLER_VIEWS.includes(v));
-      if (v !== 'race' && v !== 'tutorial') controls.releaseAll();
+      setWantLandscape(isCtl);
+      if (!isCtl) this.releaseAll();
     }
     view.update(v);
 
-    const isCtl = CONTROLLER_VIEWS.includes(v);
-    controls.setActive(isCtl && state.joined);
+    for (const l of this.layouts.values()) l.input.setActive(isCtl && state.joined && l === view);
     const portrait = window.innerHeight > window.innerWidth * 1.05;
     const rotateOn = isCtl && portrait;
-    if (rotateOn && this.rotate.style.display === 'none') controls.releaseAll();
+    if (rotateOn && this.rotate.style.display === 'none') this.releaseAll();
     show(this.rotate, rotateOn);
     toggleClass(this.root, 'in-race', isCtl);
+    this.root.setAttribute('data-game', activeGame());
+    if (state.phone?.games?.length || state.phone?.game) this.root.setAttribute('data-hub', '');
+    else this.root.removeAttribute('data-hub');
     toggleClass(this.root, 'portrait', portrait);
     this.root.setAttribute('data-view', v);
 
@@ -228,9 +273,10 @@ export class App {
     d.addEventListener('touchend', onGesture, { capture: true, passive: true });
     d.addEventListener('click', onGesture, { capture: true });
     d.addEventListener('visibilitychange', () => {
-      if (d.visibilityState !== 'visible') controls.releaseAll();
+      if (d.visibilityState !== 'visible') this.releaseAll();
     });
-    window.addEventListener('blur', () => controls.releaseAll());
+    window.addEventListener('blur', () => this.releaseAll());
+    window.addEventListener('pagehide', () => this.releaseAll());
     void haptic;
   }
 

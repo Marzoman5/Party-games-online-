@@ -1,14 +1,16 @@
 /**
- * Kart Party — phone controller entry (play.html, served at /play?room=ABCD).
+ * Party Hub — phone controller entry (play.html, served at /play?room=ABCD).
  * Plain TS + DOM; must never import three.js (keep imports to net/, kart/roster,
- * track/tracks/<def>.ts and src/phone/**).
+ * track/tracks/<def>.ts, games/smash/{roster,stages,types}.ts and src/phone/**).
  */
 import './phone.css';
+import './fighter.css';
 import { App } from './app';
 import { controls } from './controls';
+import { fightControls } from './fightControls';
 import { net, normalizeRoom } from './net';
 import { settings, setSetting, type PhoneSettings } from './settings';
-import { currentView, state } from './store';
+import { activeGame, currentView, state } from './store';
 import { tilt } from './tilt';
 
 const root = document.getElementById('phone-app') ?? document.body.appendChild(document.createElement('div'));
@@ -38,7 +40,14 @@ window.__phone = {
       you: state.phone?.you ?? null,
       race: state.race,
       lastInput: { ...controls.lastInput },
-      sending: controls.isActive,
+      sending: controls.isActive || fightControls.isActive,
+      // PARTY HUB
+      game: activeGame(),
+      layout: app.layoutId,
+      fight: state.fight,
+      lastFightInput: { ...fightControls.lastFightInput },
+      fightSending: fightControls.isActive,
+      fightPackets: fightControls.sent,
       tilt: { active: tilt.active, raw: tilt.raw, offset: tilt.offset },
       settings: { ...settings },
     };

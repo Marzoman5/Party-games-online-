@@ -5,6 +5,7 @@
 import {
   PROTOCOL_VERSION,
   WS_PATH,
+  type FightInputPacket,
   type InputPacket,
   type PhoneToHost,
   type ServerToPhone,
@@ -104,7 +105,7 @@ export class Net {
     }
   }
 
-  sendInput(p: InputPacket): boolean {
+  sendInput(p: InputPacket | FightInputPacket): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && state.joined) {
       try {
         this.ws.send(JSON.stringify(p));

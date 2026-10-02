@@ -1,5 +1,7 @@
 /** "Get ready!" while the host builds the track: track name + controls cheat-sheet. */
-import { state, type ViewId } from '../store';
+import { getStage } from '../../games/smash/stages';
+import { smashSetup } from '../games';
+import { activeGame, state, type ViewId } from '../store';
 import { settings } from '../settings';
 import { THEME_COLORS, h, setText, trackById } from '../ui';
 import type { View } from './view';
@@ -25,6 +27,19 @@ export class LoadingView implements View {
 
   update(_view: ViewId): void {
     const ps = state.phone;
+    if (activeGame() === 'smash') {
+      const s = smashSetup();
+      const st = getStage(s.stageId);
+      setText(this.track, `${st.name} · ${s.mode === 'stock' ? `${s.stocks} ${s.stocks === 1 ? 'life' : 'lives'}` : `${Math.round(s.timeSec / 60)} min`}`);
+      this.track.style.color = st.theme === 'forge' ? '#ff9a4a' : st.theme === 'arena' ? '#ff7ae0' : '#8fdcff';
+      setText(this.gp, s.teams ? 'Team battle!' : '');
+      const left = settings.leftHanded;
+      const stick = `<div class="dg-side dg-steer"><b>✥ MOVE</b><small>thumb anywhere · flick + A = SMASH</small></div>`;
+      const btns = `<div class="dg-side dg-btns dg-fight"><span class="dg-b dg-a">A<br><small>attack</small></span><span class="dg-b dg-bb">B<br><small>special</small></span><span class="dg-b dg-j">JUMP</span><span class="dg-b dg-s">SHIELD</span><span class="dg-b dg-g">GRAB</span></div>`;
+      const html = left ? btns + stick : stick + btns;
+      if (this.diagram.innerHTML !== html) this.diagram.innerHTML = html;
+      return;
+    }
     const t = trackById(ps?.setup.trackId);
     setText(this.track, t ? `${t.name} · ${ps?.setup.cc ?? 100}cc · ${ps?.setup.laps ?? 3} laps` : '');
     this.track.style.color = t ? (THEME_COLORS[t.theme]?.[0] ?? '#fff') : '#fff';

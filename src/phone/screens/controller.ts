@@ -1,18 +1,19 @@
 /**
- * THE CONTROLLER (landscape): steering zone on one half, GAS / DRIFT / ITEM /
+ * KART layout (landscape): steering zone on one half, GAS / DRIFT / ITEM /
  * BRAKE on the other, race HUD strip on top. Also hosts the tutorial overlay
  * (controls stay live during the tutorial so "try it" works).
  */
 import { ITEM_INFO, itemInfo } from '../../net/items';
 import type { PhoneFx } from '../../net/protocol';
 import { controls, type ButtonId } from '../controls';
+import { TutorialCard } from '../framework/tutorialCard';
+import type { ControllerLayout } from '../framework/layout';
 import { haptic } from '../haptics';
 import { net } from '../net';
 import { settings } from '../settings';
 import { state, type ViewId } from '../store';
 import { tilt } from '../tilt';
 import { button, h, ordSuffix, setHtml, setText, show, toggleClass } from '../ui';
-import type { View } from './view';
 
 const ROULETTE_ICONS = Object.keys(ITEM_INFO)
   .filter((k) => k !== 'none' && !k.startsWith('triple'))
@@ -51,7 +52,9 @@ function ctlButton(cls: string, testid: string, inner: string): HTMLElement {
   return el;
 }
 
-export class ControllerView implements View {
+export class ControllerView implements ControllerLayout {
+  readonly id = 'kart' as const;
+  readonly input = controls;
   readonly el: HTMLElement;
   private zone: HTMLElement;
   private btnZone: HTMLElement;
@@ -79,15 +82,7 @@ export class ControllerView implements View {
   private aiChip: HTMLElement;
   // tutorial
   private tut: HTMLElement;
-  private tutDots: HTMLElement;
-  private tutTitle: HTMLElement;
-  private tutText: HTMLElement;
-  private tutSub: HTMLElement;
-  private gotIt: HTMLButtonElement;
-  private skip: HTMLButtonElement;
-  private tutDone: HTMLElement;
-  private tutAcked = false;
-  private tutStep = -1;
+  private tutCard = new TutorialCard();
 
   private view: ViewId = 'race';
   private rouletteTimer = 0;
@@ -170,27 +165,8 @@ export class ControllerView implements View {
     this.fxText = h('div', { class: 'fx-text', testid: 'fx-text' });
 
     // ----- tutorial card -----
-    this.tutDots = h('div', { class: 'tut-dots' });
-    this.tutTitle = h('div', { class: 'tut-title' });
-    this.tutText = h('div', { class: 'tut-text', testid: 'tutorial-caption' });
-    this.tutSub = h('div', { class: 'tut-sub' });
-    this.gotIt = button('Got it! 👍', 'btn-gotit', () => {
-      this.tutAcked = true;
-      net.send({ t: 'tut_ok' });
-      this.update(this.view);
-    }, 'btn btn-gotit');
-    this.skip = button('Skip ⏭', 'btn-skip', () => net.send({ t: 'tut_skip' }), 'btn btn-skip');
-    this.tutDone = h('div', { class: 'tut-done', testid: 'tutorial-waiting' });
-    for (const b of [this.gotIt, this.skip]) b.setAttribute('data-click', '');
-    this.tut = h(
-      'div',
-      { class: 'tut-card', testid: 'tutorial-card', 'data-click': '' },
-      h('div', { class: 'tut-head' }, h('span', { class: 'tut-badge', text: 'HOW TO PLAY' }), this.tutDots),
-      this.tutTitle,
-      this.tutText,
-      this.tutSub,
-      h('div', { class: 'tut-actions' }, this.gotIt, this.tutDone, this.skip),
-    );
+    this.tut = this.tutCard.el;
+    this.tutCard.onChange = () => this.update(this.view);
 
     const main = h('div', { class: 'ctl-main' }, this.zone, this.btnZone);
     this.el = h(
@@ -235,7 +211,7 @@ export class ControllerView implements View {
     clearTimeout(this.rocketTimer);
     this.stopRoulette();
     controls.releaseAll();
-    this.tutStep = -1;
+    this.tutCard.reset();
   }
 
   /** Thumb-friendly button placement, computed from the zone size. */
@@ -295,53 +271,25 @@ export class ControllerView implements View {
     show(this.tiltInd, settings.tilt);
     show(this.tut, tut);
     if (tut) this.updateTutorial();
-    else this.tutAcked = false;
+    else this.tutCard.reset();
     this.updateRace();
   }
 
   private updateTutorial(): void {
-    const ps = state.phone;
-    const t = ps?.tutorial;
-    const step = Math.max(0, Math.min(TUTORIAL_STEPS.length - 1, t?.step ?? 0));
-    const total = t?.total ?? TUTORIAL_STEPS.length;
+    const step = this.tutCard.currentStep(TUTORIAL_STEPS.length);
     const s = TUTORIAL_STEPS[step];
-    if (step !== this.tutStep) {
-      this.tutStep = step;
-      // restart the pulse animation
-      this.tut.classList.remove('pop');
-      void this.tut.offsetWidth;
-      this.tut.classList.add('pop');
-      haptic('tick');
-    }
-    const dots = Array.from({ length: total }, (_, i) => `<i class="${i === step ? 'on' : i < step ? 'done' : ''}"></i>`).join('');
-    setHtml(this.tutDots, dots);
-    setText(this.tutTitle, `${step + 1}. ${s.title}`);
     let text = s.text;
     let sub = s.sub ?? '';
     if (s.target === 'gas' && !settings.autoAccelerate) {
       text = 'Hold GAS to drive';
       sub = 'Auto-accelerate is OFF (change it in ⚙️)';
     }
-    setText(this.tutText, text);
-    setText(this.tutSub, sub);
-    show(this.tutSub, sub !== '');
-    this.tut.setAttribute('data-step', String(step));
+    this.tutCard.render(step, TUTORIAL_STEPS.length, { title: s.title, text, sub });
 
     const hl = (el: HTMLElement, on: boolean) => toggleClass(el, 'hl', on);
     hl(this.zone, s.target === 'steer');
     for (const id of Object.keys(this.btn) as ButtonId[]) hl(this.btn[id], s.target === id);
     hl(this.pauseBtn, s.target === 'pause');
-
-    const you = ps?.you;
-    const done = this.tutAcked || !!you?.tutorialDone;
-    show(this.gotIt, !done);
-    show(this.tutDone, done);
-    if (done) {
-      const players = (ps?.players ?? []).filter((p) => p.connected);
-      const n = players.filter((p) => p.tutorialDone || (p.playerId === state.playerId && this.tutAcked)).length;
-      setText(this.tutDone, `✓ Waiting for others… (${n}/${players.length || 1})`);
-    }
-    show(this.skip, !!you?.isLeader);
   }
 
   private clearTutorialHighlights(): void {
@@ -473,6 +421,11 @@ export class ControllerView implements View {
       item: ['#ffe14a', ''],
       go: ['#3ddc5a', ''],
       finish: ['#ffcf1f', ''],
+      ko: ['#ff2a2a', 'KO!'],
+      koOther: ['#ffcf1f', ''],
+      shieldBreak: ['#ff2a2a', ''],
+      land: ['#ffffff', ''],
+      game: ['#ffcf1f', ''],
     };
     haptic(m.kind === 'finish' ? 'finish' : m.kind);
     if (m.kind === 'go') {

@@ -1,5 +1,6 @@
 /** ⚙️ Settings sheet (per-phone, persisted). */
-import { settings, setSetting, onSettings, type PhoneSettings } from '../settings';
+import { settings, setSetting, onSettings, STICK_SIZES, type PhoneSettings } from '../settings';
+import { activeGame } from '../store';
 import { tilt, tiltSupported } from '../tilt';
 import { button, h, setText, show, toast, toggleClass } from '../ui';
 import { haptic } from '../haptics';
@@ -36,12 +37,25 @@ export class SettingsPanel {
   private tiltExtra: HTMLElement;
   private tiltStatus: HTMLElement;
   private fsBtn: HTMLButtonElement;
+  private kartOnly: HTMLElement[] = [];
+  private smashOnly: HTMLElement[] = [];
+  private stickBtns = new Map<number, HTMLButtonElement>();
+  private head: HTMLElement;
 
   constructor() {
     const vibOk = typeof (navigator as Navigator & { vibrate?: unknown }).vibrate === 'function';
     const auto = toggleRow('Auto-accelerate', 'Kart drives itself forward — BRAKE to slow down', 'autoAccelerate', 'set-auto');
     const vib = toggleRow('Vibration', vibOk ? 'Buzz on hits, boosts and laps' : 'Not supported on this phone', 'vibration', 'set-vibration');
-    const lefty = toggleRow('Left-handed layout', 'Buttons on the left, steering on the right', 'leftHanded', 'set-lefthanded');
+    const lefty = toggleRow('Left-handed layout', 'Buttons on the left, stick / steering on the right', 'leftHanded', 'set-lefthanded');
+    const tapJump = toggleRow('Tap-jump', 'Smash: flick the stick UP to jump (off = only the JUMP button)', 'tapJump', 'set-tapjump');
+    const stickSeg = h('div', { class: 'seg stick-seg' });
+    for (const [v, label] of STICK_SIZES) {
+      const b = button(label, `set-stick-${label}`, () => setSetting('stickSize', v), 'seg-btn');
+      this.stickBtns.set(v, b);
+      stickSeg.append(b);
+    }
+    const stickRow = h('div', { class: 'set-row' }, h('div', { class: 'set-text' }, h('b', { text: 'Stick size' }), h('small', { text: 'How far you push the floating stick' })), stickSeg);
+    this.smashOnly.push(tapJump, stickRow);
     const touchSens = rangeRow('Touch steering sensitivity', 'touchSensitivity', 'set-touch-sens');
 
     let tiltBlock: HTMLElement;
@@ -77,14 +91,18 @@ export class SettingsPanel {
     show(this.fsBtn, fullscreenSupported());
 
     this.rows.push(auto, vib, lefty, touchSens);
+    this.kartOnly.push(auto, touchSens, tiltBlock);
+    this.head = h('b', { text: '⚙️ Controller settings' });
     const close = button('Done ✓', 'btn-settings-close', () => this.close(), 'btn btn-start');
     const sheet = h(
       'div',
       { class: 'sheet scrollable' },
-      h('div', { class: 'sheet-head' }, h('b', { text: '⚙️ Controller settings' })),
+      h('div', { class: 'sheet-head' }, this.head),
       auto,
       touchSens,
       tiltBlock,
+      tapJump,
+      stickRow,
       vib,
       lefty,
       h('div', { class: 'sheet-foot' }, this.fsBtn, close),
@@ -134,6 +152,20 @@ export class SettingsPanel {
   }
 
   sync(): void {
+    const smash = activeGame() === 'smash';
+    for (const el of this.kartOnly) show(el, !smash);
+    for (const el of this.smashOnly) show(el, smash);
+    setText(this.head, smash ? '⚙️ Fighter controller settings' : '⚙️ Controller settings');
+    let best = 0;
+    let bestD = Infinity;
+    for (const [v] of STICK_SIZES) {
+      const d = Math.abs(v - settings.stickSize);
+      if (d < bestD) {
+        bestD = d;
+        best = v;
+      }
+    }
+    for (const [v, b] of this.stickBtns) toggleClass(b, 'sel', v === best);
     this.el.querySelectorAll<HTMLElement>('.set-row[data-key]').forEach((row) => {
       const key = row.getAttribute('data-key') as keyof PhoneSettings;
       const sw = row.querySelector('.tgl');
@@ -144,7 +176,7 @@ export class SettingsPanel {
       }
       (row as HTMLElement & { sync?: () => void }).sync?.();
     });
-    show(this.tiltExtra, settings.tilt);
+    show(this.tiltExtra, settings.tilt && !smash);
     setText(
       this.tiltStatus,
       !settings.tilt ? '' : tilt.hasData ? `angle ${(tilt.raw - tilt.offset).toFixed(0)}°` : 'waiting for sensor…',

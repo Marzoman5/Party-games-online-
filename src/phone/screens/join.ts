@@ -56,7 +56,7 @@ export class JoinView implements View {
       h(
         'div',
         { class: 'join-card' },
-        h('div', { class: 'logo', html: 'KART<span>PARTY</span>' }),
+        h('div', { class: 'logo', html: 'PARTY<span>HUB</span>' }),
         this.msg,
         h('div', { class: 'join-label', text: 'Enter the 4-letter code shown on the TV' }),
         h('div', { class: 'join-row' }, this.input, this.go),

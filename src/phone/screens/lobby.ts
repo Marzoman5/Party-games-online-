@@ -2,8 +2,11 @@
  * Lobby / title / connecting / waiting: profile editor (name + racer + READY),
  * player list and the leader's controls.
  */
-import { SLOT_COLORS, type LobbyPlayer } from '../../net/protocol';
+import { SLOT_COLORS, type GameId, type LobbyPlayer } from '../../net/protocol';
 import type { CharacterDef } from '../../core/types';
+import type { FighterDef } from '../../games/smash/types';
+import { FIGHTERS } from '../../games/smash/roster';
+import { gameInfo, gameList } from '../games';
 import { net } from '../net';
 import {
   MAX_NAME,
@@ -17,7 +20,7 @@ import {
   shownCharacter,
   shownReady,
 } from '../profile';
-import { state, type ViewId } from '../store';
+import { activeGame, state, type ViewId } from '../store';
 import { CHARACTERS, avatarSvg, button, charById, h, hex, setHtml, setText, show, toast, toggleClass } from '../ui';
 import { haptic } from '../haptics';
 import type { View } from './view';
@@ -27,6 +30,30 @@ const STAT_LABELS: [keyof CharacterDef['stats'], string][] = [
   ['acceleration', 'ACC'],
   ['handling', 'HDL'],
 ];
+
+const FSTAT_LABELS: [keyof FighterDef['bars'], string][] = [
+  ['power', 'POW'],
+  ['speed', 'SPD'],
+  ['weight', 'WGT'],
+  ['jump', 'JMP'],
+  ['range', 'RNG'],
+];
+
+export function fighterDef(id: string | null | undefined): FighterDef | null {
+  if (!id) return null;
+  return FIGHTERS.find((f) => f.id === id) ?? null;
+}
+
+function esc(t: string): string {
+  return t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] ?? ch);
+}
+
+/** Smash fighter info (archetype, specials, tip) for the character select. */
+export function fighterInfoHtml(c: CharacterDef, f: FighterDef): string {
+  const sp = f.specials;
+  const mv = (k: string, m: { name: string }) => `<span class="mv"><i>${k}</i>${esc(m.name)}</span>`;
+  return `<div class="fi-head"><b>${esc(c.name)}</b><span class="arch-pill">${esc(f.archetypeLabel)}</span><span class="fi-tip">${esc(f.tip)}</span></div><div class="fi-moves">${mv('B', sp.neutral)}${mv('→B', sp.side)}${mv('↑B', sp.up)}${mv('↓B', sp.down)}</div>`;
+}
 
 function racerCard(c: CharacterDef): HTMLButtonElement {
   const b = h('button', { class: 'racer', testid: `char-${c.id}`, type: 'button', style: `--rc:${hex(c.color)}` });
@@ -41,11 +68,22 @@ function racerCard(c: CharacterDef): HTMLButtonElement {
       ),
     );
   }
+  const f = fighterDef(c.id);
+  const fstats = h('div', { class: 'stats fstats' });
+  if (f) {
+    for (const [k, label] of FSTAT_LABELS) {
+      fstats.append(
+        h('div', { class: 'stat' }, h('span', { text: label }), h('i', null, h('b', { style: `width:${Math.round((Math.max(0, Math.min(5, f.bars[k])) / 5) * 100)}%` }))),
+      );
+    }
+  }
   b.append(
     avatarSvg(c, 46),
     h('div', { class: 'racer-name', text: c.name }),
     h('div', { class: `wclass w-${c.weightClass}`, text: c.weightClass }),
+    h('div', { class: 'arch', text: f?.archetypeLabel ?? '' }),
     stats,
+    fstats,
     h('div', { class: 'taken-tag', text: 'TAKEN' }),
   );
   b.addEventListener('click', () => {
@@ -82,6 +120,11 @@ export class LobbyView implements View {
   private transferMenu: HTMLElement;
   private transferKey = '';
   private side: HTMLElement;
+  private sideTitle: HTMLElement;
+  private gamePick: HTMLElement;
+  private gameKey = '';
+  private gameLocal: GameId | null = null;
+  private gameLocalAt = 0;
 
   constructor() {
     lobbyRefresh = () => this.update(this.lastView);
@@ -150,7 +193,9 @@ export class LobbyView implements View {
       h('div', { class: 'chip-wrap' }, transferBtn, this.transferMenu),
     );
 
-    this.side = h('section', { class: 'side' }, this.chips, h('div', { class: 'side-title', text: 'Racers' }), this.plist);
+    this.sideTitle = h('div', { class: 'side-title', text: 'Racers' });
+    this.side = h('section', { class: 'side' }, this.chips, this.sideTitle, this.plist);
+    this.gamePick = h('div', { class: 'game-pick', testid: 'game-picker' });
 
     this.readyBtn = button('', 'btn-ready', () => {
       setReady(!shownReady());
@@ -160,7 +205,7 @@ export class LobbyView implements View {
     this.reason = h('div', { class: 'reason', testid: 'start-reason' });
     const actions = h('section', { class: 'actions' }, h('div', { class: 'action-row' }, this.readyBtn, this.startBtn), this.reason);
 
-    this.el = h('div', { class: 'screen lobby scrollable', testid: 'screen-lobby' }, profileCol, this.side, actions);
+    this.el = h('div', { class: 'screen lobby scrollable', testid: 'screen-lobby' }, this.gamePick, profileCol, this.side, actions);
   }
 
   private lastView: ViewId = 'lobby';
@@ -171,11 +216,17 @@ export class LobbyView implements View {
     const ps = state.phone;
     const you = ps?.you ?? null;
     const waiting = view === 'waiting';
+    const game = activeGame();
+    const smash = game === 'smash';
+    toggleClass(this.el, 'g-smash', smash);
+    this.el.setAttribute('data-game', game);
+    this.renderGamePick(!!you?.isLeader && !waiting);
+    setText(this.sideTitle, smash ? 'Fighters' : 'Racers');
 
     // Banner
     let bannerText = '';
     if (view === 'connecting') bannerText = state.conn === 'reconnecting' ? 'Reconnecting…' : 'Joining the party…';
-    else if (waiting) bannerText = "🏁 A race is in progress — you'll join the next one!";
+    else if (waiting) bannerText = smash ? "🥊 A match is in progress — you'll join the next one!" : "🏁 A race is in progress — you'll join the next one!";
     else if (view === 'title') bannerText = '🎉 You’re in! Getting the lobby ready…';
     setText(this.banner, bannerText);
     show(this.banner, bannerText !== '');
@@ -195,8 +246,10 @@ export class LobbyView implements View {
       card.setAttribute('aria-pressed', String(id === sel));
     }
     const c = charById(sel);
-    const infoText = c ? `${c.name} · ${c.tagline}` : 'Pick your racer!';
-    setText(this.info, infoText);
+    const fd = smash && c ? fighterDef(c.id) : null;
+    if (fd && c) setHtml(this.info, fighterInfoHtml(c, fd));
+    else setHtml(this.info, esc(c ? `${c.name} · ${c.tagline}` : smash ? 'Pick your fighter!' : 'Pick your racer!'));
+    toggleClass(this.info, 'rich', !!fd);
 
     // Players
     const players = ps?.players ?? [];
@@ -244,6 +297,43 @@ export class LobbyView implements View {
     } else {
       setText(this.reason, '');
     }
+  }
+
+  /** Leader: big Kart / Smash picker; others: the active game as a badge. */
+  private renderGamePick(leader: boolean): void {
+    const games = gameList();
+    const now = performance.now();
+    let active = activeGame();
+    if (this.gameLocal && now - this.gameLocalAt < 1500) active = this.gameLocal;
+    else this.gameLocal = null;
+    const key = JSON.stringify(games.map((g) => [g.id, g.title, g.emoji, g.color])) + leader + active;
+    show(this.gamePick, games.length > 1);
+    if (key === this.gameKey) return;
+    this.gameKey = key;
+    this.gamePick.textContent = '';
+    toggleClass(this.gamePick, 'leader', leader);
+    for (const g of games) {
+      if (!leader && g.id !== active) continue;
+      const [first, ...rest] = g.title.split(' ');
+      const inner = h(
+        'span',
+        { class: 'gp-inner' },
+        h('span', { class: 'gp-emoji', text: g.emoji }),
+        h('span', { class: 'gp-title' }, h('b', { text: first }), rest.length ? h('span', { class: 'gp-x', text: ` ${rest.join(' ')}` }) : null),
+      );
+      const b = button(inner, `game-pick-${g.id}`, () => {
+        if (!leader || g.id === active) return;
+        this.gameLocal = g.id;
+        this.gameLocalAt = performance.now();
+        net.send({ t: 'game', game: g.id });
+        this.update(this.lastView);
+      }, `gp-card${g.id === active ? ' sel' : ''}`);
+      b.style.setProperty('--gc', g.color || gameInfo(g.id).color);
+      b.disabled = !leader;
+      b.setAttribute('aria-pressed', String(g.id === active));
+      this.gamePick.append(b);
+    }
+    if (!leader) this.gamePick.append(h('span', { class: 'gp-note', text: 'leader picks' }));
   }
 
   private renderPlayers(players: LobbyPlayer[]): void {

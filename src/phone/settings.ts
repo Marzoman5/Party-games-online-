@@ -12,7 +12,17 @@ export interface PhoneSettings {
   vibration: boolean;
   /** Mirror the controller: buttons on the left, steering on the right. */
   leftHanded: boolean;
+  /** Smash Party: flicking the stick up jumps. */
+  tapJump: boolean;
+  /** Smash Party: floating stick radius as a fraction of the screen height (0.13..0.16). */
+  stickSize: number;
 }
+
+export const STICK_SIZES: [number, string][] = [
+  [0.13, 'S'],
+  [0.145, 'M'],
+  [0.16, 'L'],
+];
 
 export const DEFAULT_SETTINGS: PhoneSettings = {
   autoAccelerate: true,
@@ -21,6 +31,8 @@ export const DEFAULT_SETTINGS: PhoneSettings = {
   touchSensitivity: 1,
   vibration: true,
   leftHanded: false,
+  tapJump: false,
+  stickSize: 0.145,
 };
 
 const KEY = 'kp.settings';
@@ -56,7 +68,12 @@ function load(): PhoneSettings {
   }
   s.tiltSensitivity = clampSens(s.tiltSensitivity);
   s.touchSensitivity = clampSens(s.touchSensitivity);
+  s.stickSize = clampStick(s.stickSize);
   return s;
+}
+
+function clampStick(v: number): number {
+  return Number.isFinite(v) ? Math.max(0.12, Math.min(0.17, v)) : 0.145;
 }
 
 function clampSens(v: number): number {
@@ -70,6 +87,7 @@ export function setSetting<K extends keyof PhoneSettings>(key: K, value: PhoneSe
   if (!(key in DEFAULT_SETTINGS)) return;
   let v = value;
   if (key === 'tiltSensitivity' || key === 'touchSensitivity') v = clampSens(Number(v)) as PhoneSettings[K];
+  else if (key === 'stickSize') v = clampStick(Number(v)) as PhoneSettings[K];
   else if (typeof DEFAULT_SETTINGS[key] === 'boolean') v = Boolean(v) as PhoneSettings[K];
   settings[key] = v;
   lsSet(KEY, JSON.stringify(settings));
