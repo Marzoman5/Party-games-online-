@@ -7,18 +7,19 @@ import { clamp01 } from '../core/math';
 import { cssHex, el, TextField } from './dom';
 
 const TIPS: readonly string[] = [
-  'Hold DRIFT (Space / Shift) through a corner and release for a mini-turbo. Longer drift = bigger boost.',
-  'Tap the throttle just as the countdown hits 1 for a rocket start. Hold it too early and you will spin out.',
-  'Hold BRAKE while using a shell to throw it backwards.',
-  'Press Q to look behind you. Check what is coming before dropping a banana.',
-  'Boost pads (glowing chevrons) give a free +45% speed burst. Line them up.',
-  'Item odds depend on your place. Trailing racers get stars, lightning and blue shells.',
-  'A star makes you invincible and destroys any hazard you touch.',
+  'Hold DRIFT through a corner and release for a mini-turbo. Longer drift = bigger boost.',
+  'Press GAS just as the countdown hits 1 for a ROCKET START. Too early and your engine burns out!',
+  'Already holding gas? Tap DRIFT on "1" for a rocket start.',
+  'Hold BRAKE while using a BOUNCER or SEEKER to throw it backwards.',
+  'Use LOOK BACK to check what is coming before dropping a BANANA.',
+  'Boost pads (glowing chevrons) give a free speed burst. Line them up.',
+  'Item odds depend on your place. Trailing racers get SUPERNOVA, THUNDER and LEADER ZAP.',
+  'SUPERNOVA makes you invincible and smashes any hazard you touch.',
   'Staying on the road matters: off-road cuts your top speed almost in half.',
-  'Use a mushroom on the long straight, or to recover after a hit.',
-  'Heavy karts bump light karts around. Pick your weight class wisely.',
-  'Hop off jump crests for a small landing boost.',
-  'Press M to mute the audio at any time.',
+  'Save a TURBO for the long straight, or to recover after a hit.',
+  'Heavy karts bump light karts around. Pick your racer wisely.',
+  'Hop off ramps and press DRIFT mid-air for a trick boost on landing.',
+  'Press M on the host keyboard to mute the audio.',
 ];
 
 const TIP_INTERVAL = 2.4;
@@ -52,10 +53,10 @@ export class LoadingScreen {
     this.tipText = new TextField(el('span', 'loading-tip-text', '', this.tipNode));
   }
 
-  show(def: TrackDefinition): void {
+  show(def: TrackDefinition, laps = def.laps): void {
     this.title.set(def.name.toUpperCase());
     const stars = '★'.repeat(def.difficulty) + '☆'.repeat(3 - def.difficulty);
-    this.subtitle.set(`${def.laps} LAPS  ·  ${stars}  ·  ${def.theme.toUpperCase()}`);
+    this.subtitle.set(`${laps} LAP${laps === 1 ? '' : 'S'}  ·  ${stars}  ·  ${def.theme.toUpperCase()}`);
     const env = def.environment;
     this.band.style.background = `linear-gradient(90deg, ${cssHex(env.skyTop)}, ${cssHex(env.skyHorizon)}, ${cssHex(
       def.palette.road,

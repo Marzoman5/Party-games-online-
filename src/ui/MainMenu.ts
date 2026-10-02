@@ -4,7 +4,10 @@
  */
 import type { CharacterDef, Difficulty, InputState, RaceSettings, TrackDefinition } from '../core/types';
 import { events } from '../core/events';
-import { GAME_TITLE, DEFAULT_LAPS } from '../core/constants';
+import { DEFAULT_LAPS } from '../core/constants';
+
+/** Title shown by the engine's own (solo) menus. */
+export const ENGINE_TITLE = 'KART PARTY';
 import { button, cssHex, cssRgba, el, TextField } from './dom';
 
 export type MenuPanel = 'title' | 'characterSelect' | 'trackSelect';
@@ -61,7 +64,7 @@ export class MainMenu {
     // ---------------------------------------------------------------- title
     const title = el('section', 'panel-title-screen', undefined, this.rootNode);
     const logoWrap = el('div', 'logo', undefined, title);
-    const words = GAME_TITLE.split(' ');
+    const words = ENGINE_TITLE.split(' ');
     words.forEach((w, i) => {
       const line = el('span', `logo-word logo-word-${i}`, undefined, logoWrap);
       line.dataset.text = w;
@@ -86,7 +89,7 @@ export class MainMenu {
       el('kbd', '', k, row);
       el('span', '', v, row);
     }
-    el('div', 'version', 'v1.0 · Three.js · 100% procedural · gamepad supported', title);
+    el('div', 'version', 'Solo keyboard / gamepad mode', title);
     title.addEventListener('click', () => {
       if (this.panel === 'title') this.goTo('characterSelect', true);
     });

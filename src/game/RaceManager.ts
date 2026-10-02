@@ -11,11 +11,25 @@ import { seededRandom, trackDelta, wrap01 } from '../core/math';
 
 export type RacePhase = 'grid' | 'countdown' | 'racing' | 'complete';
 
-const PLAYER_GRID_SLOT = 7;
 const COUNTDOWN_STEPS = 3;
-const START_BOOST_WINDOW = 0.6;
-const START_BOOST_WEAK_WINDOW = 1.2;
-const START_SPINOUT_HOLD = 2.6;
+/**
+ * Rocket start (per human). We remember WHEN the throttle went down (rising edge)
+ * during the countdown, measured as seconds before GO:
+ *   - throttle held since before the countdown began (phone auto-accelerate, or a
+ *     player who never let go) -> neutral: no boost, no penalty;
+ *   - rose within ROCKET_WINDOW s of GO and still held at GO -> ROCKET start;
+ *   - rose within GOOD_WINDOW s of GO -> small boost;
+ *   - rose earlier during the countdown and held to GO -> BURNOUT (engine stalls
+ *     for BURNOUT_SECONDS, no boost);
+ *   - not holding throttle at GO -> nothing.
+ * A DRIFT tap while the throttle is held re-arms the timer, so a player who
+ * held gas the whole time can still earn a rocket by tapping DRIFT on "1".
+ * Phones with auto-accelerate send throttle 0 during "3"/"2" and start the
+ * auto-gas ~0.35 s before GO, so they land in the rocket window by design.
+ */
+const ROCKET_WINDOW = 0.85;
+const GOOD_WINDOW = 1.3;
+const BURNOUT_SECONDS = 0.7;
 const WRONG_WAY_SECONDS = 1.2;
 const WRONG_WAY_SPEED = -1;
 const VOID_SECONDS = 1.5;
@@ -42,7 +56,18 @@ interface Tracker {
   throttleStreak: number;
   aiStartBoost: boolean;
   respawnCount: number;
+  human: boolean;
+  /** Countdown timer value when the throttle last went down; -Infinity = held since before the countdown; NaN = not held. */
+  throttleRiseAt: number;
+  throttleHeld: boolean;
+  prevDrift: boolean;
+  /** Seconds of post-GO stall (burnout). */
+  burnout: number;
+  /** Did not finish (force-finished at race end): time is reported as -1. */
+  dnf: boolean;
 }
+
+export type StartResult = 'rocket' | 'good' | 'burnout' | 'none';
 
 function makeSampleScratch(): TrackSample {
   return {
@@ -65,8 +90,11 @@ export class RaceManager {
   private countdownTimer = 0;
   private countdownEmitted = 0;
   private finishedCount = 0;
-  private playerFinishedAt = -1;
+  /** Race time when the grace period started (all humans finished / first finisher with no humans). */
+  private graceStartAt = -1;
   private allFinishedEmitted = false;
+  /** Called at GO for every human kart (HUD feedback). */
+  onStartResult: ((kartId: number, result: StartResult) => void) | null = null;
 
   private readonly trackers: Tracker[] = [];
   private readonly order: Tracker[] = [];
@@ -75,7 +103,7 @@ export class RaceManager {
   private readonly tmpPos = new THREE.Vector3();
   private readonly tmpQuat = new THREE.Quaternion();
   private readonly tmpEuler = new THREE.Euler();
-  private readonly playerTracker: Tracker | null;
+  private readonly humanTrackers: Tracker[] = [];
 
   constructor(
     private readonly track: ITrack,
@@ -110,11 +138,17 @@ export class RaceManager {
         throttleStreak: 0,
         aiStartBoost: !kart.state.isPlayer && rng() < aiBoostChance,
         respawnCount: 0,
+        human: kart.state.isPlayer,
+        throttleRiseAt: Number.NaN,
+        throttleHeld: false,
+        prevDrift: false,
+        burnout: 0,
+        dnf: false,
       };
       this.trackers.push(tr);
       this.order.push(tr);
     }
-    this.playerTracker = this.trackers.find((t) => t.kart.state.isPlayer) ?? null;
+    for (const tr of this.trackers) if (tr.human) this.humanTrackers.push(tr);
 
     this.placeOnGrid();
     this.sortOrder();
@@ -144,13 +178,73 @@ export class RaceManager {
     return this.allFinishedEmitted;
   }
 
+  /** 3, 2, 1 while counting down, 0 otherwise. */
+  get countdownValue(): number {
+    if (this.phase !== 'countdown') return 0;
+    return Math.max(1, COUNTDOWN_STEPS - Math.floor(this.countdownTimer / COUNTDOWN_STEP_SECONDS));
+  }
+
   /** Begin the 3-2-1-GO sequence (karts stay frozen until GO). */
   startCountdown(): void {
     if (this.phase !== 'grid') return;
     this.phase = 'countdown';
     this.countdownTimer = 0;
     this.countdownEmitted = 0;
-    for (const tr of this.trackers) tr.kart.setFrozen(true);
+    for (const tr of this.trackers) {
+      tr.kart.setFrozen(true);
+      tr.throttleHeld = tr.kart.input.throttle > 0.5;
+      tr.throttleRiseAt = tr.throttleHeld ? Number.NEGATIVE_INFINITY : Number.NaN;
+      tr.prevDrift = tr.kart.input.drift;
+    }
+  }
+
+  /** Attract mode: skip the countdown entirely (no events, no start boosts). */
+  startImmediately(): void {
+    if (this.phase === 'racing' || this.phase === 'complete') return;
+    this.phase = 'racing';
+    this.time = 0;
+    for (const tr of this.trackers) {
+      tr.kart.setFrozen(false);
+      tr.stuckTimer = 0;
+    }
+  }
+
+  /** Debug: jump straight to GO (used by finish hooks during intro/countdown). */
+  skipToRacing(): void {
+    if (this.phase === 'grid' || this.phase === 'countdown') this.go();
+  }
+
+  isFinished(kartId: number): boolean {
+    const tr = this.trackers.find((t) => t.kart.state.id === kartId);
+    return !!tr && tr.kart.state.finished;
+  }
+
+  isDnf(kartId: number): boolean {
+    const tr = this.trackers.find((t) => t.kart.state.id === kartId);
+    return !!tr && tr.dnf;
+  }
+
+  /** Debug: make one kart cross the line now (keeps the order plausible). */
+  forceFinish(kartId: number): void {
+    this.skipToRacing();
+    const tr = this.trackers.find((t) => t.kart.state.id === kartId);
+    if (!tr || tr.kart.state.finished) return;
+    tr.lapsCompleted = this.totalLaps;
+    tr.kart.state.raceProgress = Math.max(tr.kart.state.raceProgress, this.totalLaps + 0.001);
+    this.finish(tr);
+  }
+
+  /** Debug: finish everyone in the current order and complete the race. */
+  forceFinishAll(): void {
+    this.skipToRacing();
+    this.sortOrder();
+    for (const tr of this.order) {
+      if (!tr.kart.state.finished) {
+        tr.lapsCompleted = this.totalLaps;
+        this.finish(tr);
+      }
+    }
+    this.completeRace();
   }
 
   update(dt: number): void {
@@ -194,17 +288,18 @@ export class RaceManager {
   private placeOnGrid(): void {
     const grid = this.track.startGrid;
     if (grid.length === 0) return;
-    let aiSlot = 0;
+    // Humans start at the back of the grid (human 0 last), AI fill the front.
+    const n = this.trackers.length;
+    const slotFor = new Map<Tracker, number>();
+    let h = 0;
+    let a = 0;
+    for (const tr of this.trackers) {
+      if (tr.human) slotFor.set(tr, n - 1 - h++);
+      else slotFor.set(tr, a++);
+    }
     for (const tr of this.trackers) {
       const s = tr.kart.state;
-      let slotIndex: number;
-      if (s.isPlayer) {
-        slotIndex = Math.min(PLAYER_GRID_SLOT, grid.length - 1);
-      } else {
-        if (aiSlot === Math.min(PLAYER_GRID_SLOT, grid.length - 1)) aiSlot++;
-        slotIndex = aiSlot % grid.length;
-        aiSlot++;
-      }
+      const slotIndex = Math.min(slotFor.get(tr) ?? 0, grid.length - 1) % grid.length;
       const slot = grid[slotIndex];
       tr.kart.resetTo(slot.position, slot.quaternion);
       tr.kart.setFrozen(true);
@@ -226,10 +321,15 @@ export class RaceManager {
   }
 
   private updateCountdown(dt: number): void {
-    // Track how long the player has been holding the throttle (for the start boost).
-    if (this.playerTracker) {
-      const thr = this.playerTracker.kart.input.throttle;
-      this.playerTracker.throttleStreak = thr > 0.5 ? this.playerTracker.throttleStreak + dt : 0;
+    // Rocket start bookkeeping for every human (see ROCKET_WINDOW).
+    for (const tr of this.humanTrackers) {
+      const inp = tr.kart.input;
+      const thr = inp.throttle > 0.5;
+      if (thr && !tr.throttleHeld) tr.throttleRiseAt = this.countdownTimer;
+      else if (!thr) tr.throttleRiseAt = Number.NaN;
+      if (thr && inp.drift && !tr.prevDrift) tr.throttleRiseAt = this.countdownTimer;
+      tr.throttleHeld = thr;
+      tr.prevDrift = inp.drift;
     }
 
     this.countdownTimer += dt;
@@ -252,21 +352,42 @@ export class RaceManager {
     }
     events.emit('race:start', { trackId: this.track.def.id });
 
-    // Start boost / jump-start penalty.
-    const p = this.playerTracker;
-    if (p) {
-      const held = p.throttleStreak;
-      if (held >= START_SPINOUT_HOLD) {
-        p.kart.applyHit('collision', -1);
-      } else if (held > 0.02 && held <= START_BOOST_WINDOW) {
-        p.kart.applyBoost(0.4, 1.0, 'start');
-      } else if (held > START_BOOST_WINDOW && held <= START_BOOST_WEAK_WINDOW) {
-        p.kart.applyBoost(0.2, 0.6, 'start');
+    // Start boost / burnout per human (see ROCKET_WINDOW).
+    const total = COUNTDOWN_STEPS * COUNTDOWN_STEP_SECONDS;
+    for (const tr of this.humanTrackers) {
+      let result: StartResult = 'none';
+      const held = tr.kart.input.throttle > 0.5;
+      const rise = tr.throttleRiseAt;
+      if (held && Number.isFinite(rise)) {
+        const before = total - rise;
+        if (before <= ROCKET_WINDOW) result = 'rocket';
+        else if (before <= GOOD_WINDOW) result = 'good';
+        else result = 'burnout';
       }
+      if (result === 'rocket') tr.kart.applyBoost(0.45, 1.1, 'start');
+      else if (result === 'good') tr.kart.applyBoost(0.22, 0.6, 'start');
+      else if (result === 'burnout') {
+        // Prefer the kart's own wheelspin stall (visual wobble); fall back to a short freeze.
+        const k = tr.kart as IKart & { applyBurnout?: () => void };
+        if (typeof k.applyBurnout === 'function') k.applyBurnout();
+        else {
+          tr.burnout = BURNOUT_SECONDS;
+          tr.kart.setFrozen(true);
+        }
+      }
+      this.onStartResult?.(tr.kart.state.id, result);
     }
     for (const tr of this.trackers) {
       if (tr.aiStartBoost) tr.kart.applyBoost(0.3, 0.8, 'start');
     }
+  }
+
+  private completeRace(): void {
+    if (this.allFinishedEmitted) return;
+    this.forceFinishRemaining();
+    this.phase = 'complete';
+    this.allFinishedEmitted = true;
+    events.emit('race:allFinished', {});
   }
 
   private updateRacing(dt: number): void {
@@ -279,13 +400,17 @@ export class RaceManager {
     this.sortOrder();
     this.updatePlaces(dt);
 
-    if (this.phase === 'racing' && this.playerFinishedAt >= 0 && !this.allFinishedEmitted) {
-      const allDone = this.finishedCount >= this.trackers.length;
-      if (allDone || this.time - this.playerFinishedAt >= FINISH_GRACE_SECONDS) {
-        this.forceFinishRemaining();
-        this.phase = 'complete';
-        this.allFinishedEmitted = true;
-        events.emit('race:allFinished', {});
+    if (this.phase === 'racing' && !this.allFinishedEmitted) {
+      if (this.graceStartAt < 0) {
+        const humansDone =
+          this.humanTrackers.length > 0
+            ? this.humanTrackers.every((t) => t.kart.state.finished)
+            : this.finishedCount > 0;
+        if (humansDone) this.graceStartAt = this.time;
+      }
+      if (this.graceStartAt >= 0) {
+        const allDone = this.finishedCount >= this.trackers.length;
+        if (allDone || this.time - this.graceStartAt >= FINISH_GRACE_SECONDS) this.completeRace();
       }
     }
   }
@@ -293,6 +418,16 @@ export class RaceManager {
   private updateTracker(tr: Tracker, dt: number): void {
     const kart = tr.kart;
     const s = kart.state;
+
+    // Burnout stall after a too-early throttle.
+    if (tr.burnout > 0) {
+      tr.burnout -= dt;
+      if (tr.burnout <= 0) {
+        tr.burnout = 0;
+        kart.setFrozen(false);
+      }
+      return;
+    }
 
     // Respawn freeze.
     if (tr.respawnFreeze > 0) {
@@ -410,14 +545,21 @@ export class RaceManager {
     tr.emittedPlace = s.place;
     tr.candidatePlace = s.place;
     s.wrongWay = false;
-    if (s.isPlayer && this.playerFinishedAt < 0) this.playerFinishedAt = this.time;
-    events.emit('race:finish', { kartId: s.id, place: s.place, time: s.finishTime, isPlayer: s.isPlayer });
+    if (tr.burnout > 0) {
+      tr.burnout = 0;
+      tr.kart.setFrozen(false);
+    }
+    if (!tr.dnf) events.emit('race:finish', { kartId: s.id, place: s.place, time: s.finishTime, isPlayer: s.isPlayer });
   }
 
   private forceFinishRemaining(): void {
-    // Current order is already sorted: finished first, then by progress.
+    // Order by progress (finished first) and mark the rest as DNF, no events.
+    this.sortOrder();
     for (const tr of this.order) {
-      if (!tr.kart.state.finished) this.finish(tr);
+      if (!tr.kart.state.finished) {
+        tr.dnf = true;
+        this.finish(tr);
+      }
     }
   }
 

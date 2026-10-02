@@ -1,65 +1,55 @@
 /**
- * In-race heads-up display. Pure DOM over the canvas; DOM writes only happen
- * when a displayed value actually changes.
+ * In-race heads-up display for ONE viewport. Pure DOM inside the viewport's
+ * container; DOM writes only happen when a displayed value actually changes.
+ *
+ * Several HUDs can exist at once (split-screen), so every event handler filters
+ * on this HUD's `kartId` (several karts are `isPlayer` now). Sizes are in
+ * container-query units (see style.css `.vp`), so the same markup works full
+ * screen and in a quadrant; `compact` only hides secondary elements.
  */
 import type { IKart, ITrack, ItemType } from '../core/types';
 import { ALL_ITEM_TYPES } from '../core/types';
 import { events } from '../core/events';
 import { BASE_TOP_SPEED } from '../core/constants';
 import { clamp01, damp, formatRaceTime, ordinal } from '../core/math';
+import { itemInfo } from '../net/items';
 import { el, restartAnimation, TextField } from './dom';
 import { Minimap } from './Minimap';
-
-const ITEM_LABEL: Record<ItemType, string> = {
-  none: '',
-  banana: 'BANANA',
-  triple_banana: 'BANANA ×3',
-  green_shell: 'GREEN SHELL',
-  triple_green_shell: 'GREEN ×3',
-  red_shell: 'RED SHELL',
-  triple_red_shell: 'RED ×3',
-  blue_shell: 'BLUE SHELL',
-  mushroom: 'MUSHROOM',
-  triple_mushroom: 'MUSHROOM ×3',
-  golden_mushroom: 'GOLDEN',
-  star: 'STAR',
-  lightning: 'LIGHTNING',
-  bob_omb: 'BOB-OMB',
-};
-
-const ITEM_FALLBACK_COLOR: Record<ItemType, string> = {
-  none: '#333',
-  banana: '#ffd23f',
-  triple_banana: '#ffd23f',
-  green_shell: '#3ddc5a',
-  triple_green_shell: '#3ddc5a',
-  red_shell: '#ff4040',
-  triple_red_shell: '#ff4040',
-  blue_shell: '#3f7fff',
-  mushroom: '#ff5a3a',
-  triple_mushroom: '#ff5a3a',
-  golden_mushroom: '#ffc800',
-  star: '#ffe14a',
-  lightning: '#ffef70',
-  bob_omb: '#333344',
-};
 
 /** Speedometer gauge arc length in SVG units (240° of a r=44 circle). */
 const GAUGE_ARC = 184.3;
 const ROULETTE_FALLBACK_INTERVAL = 0.09;
 const SPEED_MAX_KMH = BASE_TOP_SPEED * 3.6 * 1.7;
+const TIP_SECONDS = 3.6;
 
 interface TimedNode {
   node: HTMLElement;
   ttl: number;
 }
 
+export interface HUDOptions {
+  /** Kart this HUD follows. */
+  kartId: number;
+  /** Split-screen sizing (hides the speedometer + timer on small views). */
+  compact?: boolean;
+  /** Name tag (party mode). Omit for the solo HUD. */
+  name?: string;
+  /** Slot colour for the name tag / minimap ring. */
+  color?: string;
+  /** Show the per-viewport minimap (default true). */
+  minimap?: boolean;
+  /** kartId -> CSS colour for human karts (minimap rings). */
+  humanColors?: ReadonlyMap<number, string>;
+}
+
+export type StartResultKind = 'rocket' | 'good' | 'burnout' | 'none';
+
 export class HUD {
+  readonly kartId: number;
   private readonly rootNode: HTMLElement;
-  private readonly minimap: Minimap;
+  private readonly minimap: Minimap | null;
   private readonly unsubs: (() => void)[] = [];
   private visible = false;
-  private playerId = 0;
 
   // Item slot
   private readonly itemFrame: HTMLElement;
@@ -84,6 +74,10 @@ export class HUD {
   private gaugeValue = -1;
   private speedSmooth = 0;
 
+  // Name tag + AI badge
+  private readonly aiBadge: HTMLElement | null = null;
+  private aiShown = false;
+
   // Centre overlays
   private readonly center: HTMLElement;
   private readonly wrongWay: HTMLElement;
@@ -94,12 +88,19 @@ export class HUD {
   private readonly timed: TimedNode[] = [];
   private readonly boostGlow: HTMLElement;
   private boostGlowApplied = -1;
+  private readonly tipNode: HTMLElement;
+  private readonly tipText: TextField;
+  private tipTtl = 0;
 
   constructor(
-    root: HTMLElement,
+    container: HTMLElement,
     private readonly buildIcon: (item: ItemType) => HTMLCanvasElement,
+    opts: HUDOptions = { kartId: 0 },
   ) {
-    this.rootNode = el('div', 'hud hidden', undefined, root);
+    this.kartId = opts.kartId;
+    this.rootNode = el('div', 'hud hidden', undefined, container);
+    if (opts.compact) this.rootNode.classList.add('compact');
+    if (opts.color) this.rootNode.style.setProperty('--slot', opts.color);
 
     // Top-left: item slot
     const itemWrap = el('div', 'hud-item', undefined, this.rootNode);
@@ -107,6 +108,13 @@ export class HUD {
     this.itemIconHost = el('div', 'item-icon', undefined, this.itemFrame);
     this.itemCount = new TextField(el('div', 'item-count', '', this.itemFrame));
     this.itemLabel = new TextField(el('div', 'item-label', '', itemWrap));
+
+    // Top-centre: name tag (party)
+    if (opts.name !== undefined) {
+      const tag = el('div', 'hud-nametag', undefined, this.rootNode);
+      el('span', 'hud-nametag-name', opts.name, tag);
+      this.aiBadge = el('span', 'hud-ai-badge', 'AI DRIVING', tag);
+    }
 
     // Top-right: lap + timer
     const topRight = el('div', 'hud-topright', undefined, this.rootNode);
@@ -146,8 +154,12 @@ export class HUD {
     el('div', 'speed-unit', 'km/h', speedInner);
 
     // Bottom-right: minimap
-    const mapWrap = el('div', 'hud-minimap glass', undefined, this.rootNode);
-    this.minimap = new Minimap(mapWrap);
+    if (opts.minimap !== false) {
+      const mapWrap = el('div', 'hud-minimap glass', undefined, this.rootNode);
+      this.minimap = new Minimap(mapWrap, { humanColors: opts.humanColors });
+    } else {
+      this.minimap = null;
+    }
 
     // Centre overlays
     this.center = el('div', 'hud-center', undefined, this.rootNode);
@@ -156,14 +168,20 @@ export class HUD {
     el('span', 'wrongway-text', 'WRONG WAY', this.wrongWay);
     this.vignette = el('div', 'hud-vignette', undefined, this.rootNode);
     this.boostGlow = el('div', 'hud-boostglow', undefined, this.rootNode);
+    this.tipNode = el('div', 'hud-tip', undefined, this.rootNode);
+    this.tipText = new TextField(el('span', 'hud-tip-text', '', this.tipNode));
 
     this.subscribe();
   }
 
   // ------------------------------------------------------------------ public
 
+  get element(): HTMLElement {
+    return this.rootNode;
+  }
+
   setTrack(track: ITrack | null): void {
-    this.minimap.setTrack(track);
+    this.minimap?.setTrack(track);
   }
 
   show(): void {
@@ -176,10 +194,36 @@ export class HUD {
     this.visible = false;
   }
 
-  update(dt: number, player: IKart, karts: readonly IKart[], raceTime: number, totalLaps: number): void {
+  /** Friendly contextual tip banner (auto-hides). */
+  showTip(text: string): void {
+    this.tipText.set(text);
+    this.tipTtl = TIP_SECONDS;
+    this.tipNode.classList.add('visible');
+    restartAnimation(this.tipNode, 'tip-pop');
+  }
+
+  /** Rocket start / burnout feedback at GO. */
+  showStartResult(kind: StartResultKind): void {
+    if (kind === 'rocket') this.flashCenter('ROCKET START!', 'hud-posflash up hud-start', 1.6);
+    else if (kind === 'good') this.flashCenter('GOOD START', 'hud-posflash up hud-start', 1.3);
+    else if (kind === 'burnout') this.flashCenter('BURNOUT!', 'hud-posflash down hud-start', 1.4);
+  }
+
+  update(
+    dt: number,
+    player: IKart,
+    karts: readonly IKart[],
+    raceTime: number,
+    totalLaps: number,
+    aiControlled = false,
+  ): void {
     if (!this.visible) return;
     const s = player.state;
-    this.playerId = s.id;
+
+    if (this.aiBadge && aiControlled !== this.aiShown) {
+      this.aiShown = aiControlled;
+      this.rootNode.classList.toggle('ai-driving', aiControlled);
+    }
 
     // Place numeral
     const place = s.place > 0 ? s.place : karts.length;
@@ -197,7 +241,7 @@ export class HUD {
     // Lap + timer
     const lapShown = Math.min(Math.max(1, s.lap), totalLaps);
     this.lapText.set(`${lapShown}/${totalLaps}`);
-    this.timerText.set(formatRaceTime(raceTime));
+    this.timerText.set(formatRaceTime(s.finished && s.finishTime > 0 ? s.finishTime : raceTime));
 
     // Speedometer
     const kmh = Math.abs(s.speed) * 3.6;
@@ -219,9 +263,10 @@ export class HUD {
     this.updateItemSlot(dt, s.item, s.itemCount, s.itemRouletteActive);
 
     // Wrong way
-    if (s.wrongWay !== this.wrongWayShown) {
-      this.wrongWayShown = s.wrongWay;
-      this.wrongWay.classList.toggle('visible', s.wrongWay);
+    const ww = s.wrongWay && !s.finished;
+    if (ww !== this.wrongWayShown) {
+      this.wrongWayShown = ww;
+      this.wrongWay.classList.toggle('visible', ww);
     }
 
     // Hit vignette decay
@@ -234,7 +279,18 @@ export class HUD {
       this.vignette.style.opacity = this.vignetteAlpha.toFixed(2);
     }
 
-    // Timed centre messages
+    // Tip banner
+    if (this.tipTtl > 0) {
+      this.tipTtl -= dt;
+      if (this.tipTtl <= 0) this.tipNode.classList.remove('visible');
+    }
+
+    this.tickTimed(dt);
+    this.minimap?.update(dt, karts, s.id);
+  }
+
+  /** Keep timed banners ticking while the HUD is visible but the race isn't updating it. */
+  tickTimed(dt: number): void {
     for (let i = this.timed.length - 1; i >= 0; i--) {
       const t = this.timed[i];
       t.ttl -= dt;
@@ -243,14 +299,14 @@ export class HUD {
         this.timed.splice(i, 1);
       }
     }
-
-    this.minimap.update(dt, karts, s.id);
   }
 
   dispose(): void {
     for (const u of this.unsubs) u();
     this.unsubs.length = 0;
-    this.minimap.dispose();
+    this.minimap?.dispose();
+    this.iconCache.clear();
+    this.timed.length = 0;
     this.rootNode.remove();
   }
 
@@ -258,48 +314,51 @@ export class HUD {
 
   private subscribe(): void {
     const on = events.on.bind(events);
+    const mine = (id: number): boolean => id === this.kartId;
     this.unsubs.push(
       on('item:rouletteTick', (e) => {
-        if (!e.isPlayer && e.kartId !== this.playerId) return;
+        if (!mine(e.kartId)) return;
         this.rouletteVisual = true;
         this.rouletteTimer = 0;
         this.setIcon(this.randomItem(), false);
         this.itemFrame.classList.add('spinning');
       }),
       on('item:rouletteEnd', (e) => {
-        if (!e.isPlayer && e.kartId !== this.playerId) return;
+        if (!mine(e.kartId)) return;
         this.rouletteVisual = false;
         this.itemFrame.classList.remove('spinning');
         this.setIcon(e.item, true);
       }),
       on('race:countdown', (e) => {
+        if (!this.visible) return;
         this.flashCenter(String(e.count), 'hud-count', 0.95);
       }),
       on('race:start', () => {
+        if (!this.visible) return;
         this.flashCenter('GO!', 'hud-count hud-go', 1.1);
       }),
       on('race:lap', (e) => {
-        if (!e.isPlayer) return;
+        if (!mine(e.kartId)) return;
         if (e.isFinalLap) this.flashCenter('FINAL LAP!', 'hud-banner final', 2.4);
         else if (e.lap > 1) this.flashCenter(`LAP ${e.lap}`, 'hud-banner lap', 1.4);
       }),
       on('race:positionChange', (e) => {
-        if (!e.isPlayer) return;
+        if (!mine(e.kartId) || !this.visible) return;
         const up = e.to < e.from;
         this.flashCenter(`${up ? '▲' : '▼'} ${ordinal(e.to).toUpperCase()}`, `hud-posflash ${up ? 'up' : 'down'}`, 1.0);
       }),
       on('item:hit', (e) => {
-        if (!e.isPlayer) return;
+        if (!mine(e.kartId)) return;
         this.vignetteAlpha = 1;
         restartAnimation(this.rootNode, 'hit-shake');
       }),
       on('race:finish', (e) => {
-        if (!e.isPlayer) return;
+        if (!mine(e.kartId)) return;
         const node = this.flashCenter('FINISH', 'hud-finish', 4.5);
         el('div', 'hud-finish-place', ordinal(e.place).toUpperCase() + ' PLACE', node);
       }),
       on('kart:respawn', (e) => {
-        if (e.kartId !== this.playerId) return;
+        if (!mine(e.kartId)) return;
         this.vignetteAlpha = Math.max(this.vignetteAlpha, 0.6);
       }),
     );
@@ -348,7 +407,7 @@ export class HUD {
       this.itemIconHost.appendChild(this.getIcon(item));
     }
     this.itemFrame.classList.toggle('has-item', item !== 'none');
-    this.itemLabel.set(this.rouletteVisual ? '' : ITEM_LABEL[item]);
+    this.itemLabel.set(this.rouletteVisual ? '' : itemInfo(item).label);
     if (pop) restartAnimation(this.itemFrame, 'pop');
   }
 
@@ -373,7 +432,8 @@ export class HUD {
     c.height = 64;
     const ctx = c.getContext('2d');
     if (ctx) {
-      ctx.fillStyle = ITEM_FALLBACK_COLOR[item];
+      const info = itemInfo(item);
+      ctx.fillStyle = info.color;
       ctx.beginPath();
       ctx.arc(32, 32, 26, 0, Math.PI * 2);
       ctx.fill();
@@ -381,7 +441,7 @@ export class HUD {
       ctx.font = 'bold 22px Impact, "Arial Narrow", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(item.replace(/^triple_/, '')[0]?.toUpperCase() ?? '?', 32, 34);
+      ctx.fillText(info.label[0] ?? '?', 32, 34);
     }
     return c;
   }

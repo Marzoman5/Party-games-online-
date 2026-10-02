@@ -42,6 +42,8 @@ function makeSurfaceScratch(): SurfaceQuery {
 
 export class FollowCamera {
   private readonly camera: THREE.PerspectiveCamera;
+  /** Multiplier on the vertical FOV (tall split-screen viewports use a wider lens). */
+  fovScale = 1;
   private track: ITrack | null = null;
   private followKartId = -1;
   private initialised = false;
@@ -247,8 +249,9 @@ export class FollowCamera {
     cam.up.set(0, 1, 0);
     cam.lookAt(this.look);
     if (this.roll !== 0) cam.rotateZ(this.roll);
-    if (Math.abs(cam.fov - this.fov) > 0.01) {
-      cam.fov = this.fov;
+    const fov = this.fov * this.fovScale;
+    if (Math.abs(cam.fov - fov) > 0.01) {
+      cam.fov = fov;
       cam.updateProjectionMatrix();
     }
   }
