@@ -155,3 +155,102 @@ chromatic aberration + vignette + hit tint + flash, `OutputPass`. Must gracefull
 ## Contract additions
 
 (None yet. If you must add an optional member to a core type, list it here with your workstream letter.)
+
+---
+
+# KART PARTY extension contract (couch multiplayer, phones as controllers)
+
+Kart Party = Turbo Kart Rush (base, MIT) + ported features from Turbo Kart Rally (MIT) + a Node relay
+server, a phone controller web app and a party layer. Everything above this line still applies.
+The new frozen contract files are:
+
+- `src/net/protocol.ts` — wire protocol (phones <-> server <-> host). Shared by browser + Node.
+- `src/net/items.ts` — player-facing item names (original names; internal ItemType ids unchanged).
+- `src/game/api.ts` — `IGameHost` (engine API used by the party layer) + `window.__game` debug hooks.
+
+Do not edit these three files. If something is truly missing, add an OPTIONAL member and document it at
+the very bottom under "Kart Party contract additions".
+
+## Workstreams & exclusive file ownership
+
+| Workstream | Owns | Delivers |
+|---|---|---|
+| **SERVER** | `server/**`, `scripts/**` (except build-server.mjs edits are allowed), `play.html` is NOT theirs | Express + ws relay, LAN IP detection, QR SVG endpoint, room codes, reconnect tokens, HTTPS self-signed mode, `scripts/bots.ts` bot controller (importable `BotPhone` class + CLI) |
+| **PHONE** | `play.html`, `src/phone/**` | Mobile controller app (landscape controls, menus, tutorial mirror, settings, tilt, haptics, reconnect) |
+| **PARTY** | `src/party/**`, `src/main.ts`, `index.html` | Host net client, party session state machine, title/lobby/tutorial/setup/pause/results/GP overlays, QR display, TV mode, fullscreen, cursor hiding, `window.__party` hooks. Orchestrates the engine via `IGameHost` |
+| **ENGINE-A** | `src/game/**` (except `api.ts`), `src/ui/**`, `src/style.css` | `Game implements IGameHost`: multi-human karts, split-screen viewports + per-viewport HUD, 3-player minimap/standings quadrant, quality scaler + DPR cap, demo race, intro flyover, rocket start per human, AI takeover, contextual tips, `window.__game` hooks |
+| **ENGINE-B** | `src/kart/**`, `src/ai/**`, `src/items/**`, `src/fx/**`, `src/audio/**`, `src/track/**`, `src/core/**` (additive only) | Ramp trick boosts, cc speed scaling, particle/postfx quality knobs, original item labels in visuals, multi-human awareness in AI/audio/items |
+| **TEST** (later) | `tests/**`, `playwright.config.ts`, `docs/screenshots/**` | Playwright suite + screenshots |
+
+Nobody runs `git commit` except the lead. Do not edit files you don't own; code against the contract.
+`npm run typecheck` may show errors in other workstreams' files while they work — only fix your own.
+
+## Runtime topology
+
+```
+ phone (/play)  ──ws──┐                         ┌── host page (/) : Game (engine) + PartyApp
+ phone (/play)  ──ws──┤  Node server (relay)  ──┤        authoritative simulation
+ ...                  └── express static dist/  └── ws (single host per room)
+```
+
+- `npm start` = `vite build` (host + phone pages into `dist/`) + esbuild server -> `node dist-server/server.mjs`.
+- Server serves `dist/index.html` at `/`, `dist/play.html` at `/play`, `dist/assets/*`, WS at `/ws`.
+- HTTP endpoints: `GET /api/info` -> `{ urls: string[], port, httpsPort|null }`;
+  `GET /api/qr.svg?data=<url-encoded>` -> `image/svg+xml` QR code (generated server-side, works offline);
+  `GET /api/debug/rooms` -> `[{ room, hostConnected, players: [{playerId, connected}] }]` (tests/bots).
+- CLI flags: `--port N` (default 3000, env PORT; if busy, try next ports), `--https` (also serve HTTPS on
+  3443 with an auto-generated self-signed cert in `./certs/`, and joinUrl uses https), `--host-ip X`
+  (override LAN IP detection). Startup prints a big banner with the LAN URL(s).
+- Rooms: host connects and sends `host_hello`; server creates a 4-letter room (or reclaims `room`+`hostToken`
+  after a host reload; rooms survive 30 min without a host). Phones send `join` with room + optional token;
+  the server assigns `playerId` (stable per token) and relays. Max 4 *connected* players per room (stale
+  disconnected seats beyond that are evicted oldest-first). Room codes are case-insensitive on input.
+- Server relays phone input packets to the host *immediately* (no batching, `ws` with `perMessageDeflate:false`,
+  TCP_NODELAY default). Host -> phone messages are forwarded verbatim.
+- Liveness: phones ping every 2 s; server drops sockets silent for >6 s (ws ping/pong on server side too).
+
+## Party flow (PARTY owns the state machine; phones mirror `PhoneState.screen`)
+
+1. `title` — engine `showDemo()` (AI demo race) + big QR + room code + URL. "Press ENTER / click for solo
+   keyboard play" opens `openSoloMenu()`. First phone join -> `lobby`.
+2. `lobby` — players pick name + racer (unique racers) and Ready. Host shows cards (slot colour, avatar,
+   name, racer, ready tick, crown on leader). Leader = first joiner; transferable from the leader's phone;
+   auto-passes to the next connected player if the leader disconnects. Leader's START is enabled when all
+   connected players are ready.
+3. `tutorial` — auto-plays the first time the leader presses START in a session; replay any time with
+   "How to Play" (leader phone, or host button). Steps (index = `PhoneState.tutorial.step`, total 6):
+   `0 steer, 1 gas, 2 drift, 3 item, 4 brake, 5 pause`. ~4 s per step, then waits for every player's
+   "Got it!" (or 10 s, or leader skip). Pressing DRIFT or ITEM during the tutorial makes that player's
+   avatar react on the host ("try it").
+4. `setup` — leader's phone picks mode (single / gp), track, cc (50/100/150), laps (1–5, default 3);
+   host shows the selection live. Leader taps START RACE.
+5. `loading` -> `race` (engine phases loading/intro/countdown/racing/finished). Phones send input packets.
+6. `results` — race standings (+ GP points table: 15,12,10,8,6,4,2,1). Leader's phone: Next Race / Replay /
+   Change Track / Back to Lobby (GP: Next Race advances through the 4 tracks; after the 4th the final GP
+   podium shows and Next Race starts a new GP).
+- `paused` — any phone can pause. Leader: Resume / Restart / Quit to lobby. Others: "Vote resume" (resume
+  when a majority of connected racers voted). Host overlay mirrors the vote count.
+- Late joiners during a race get `waiting` (they can still pick name/racer), and join the next race.
+- Disconnect mid-race -> `setSlotAI(slot, true)`; reconnect with the same token -> same slot, `setSlotAI(false)`.
+
+## Host CSS conventions (shared by PARTY + ENGINE-A)
+
+- `<html class="tv">` when TV mode is on (PARTY toggles it; default ON when `innerWidth >= 1920` or `?tv=1`;
+  `?tv=0` forces off). Also sets CSS custom properties on `:root`: `--ui-scale` (1 laptop, ~1.6 TV) and
+  `--safe` (0px laptop, 5vh TV overscan margin). Engine HUD must scale with `--ui-scale` and keep content
+  inside `--safe`. PARTY also calls `game.setTvMode(on)`.
+- `<body class="hide-cursor">` during countdown/racing (PARTY).
+- Z-order: engine canvas (0) < engine HUD (#ui, 10) < party overlays (#party, 50) < toasts (100).
+- No webfonts / external URLs anywhere. Everything bundled.
+
+## `window.__party` (PARTY) — test hooks
+
+```ts
+window.__party = {
+  getState(): { screen: ScreenId; room: string; joinUrl: string; tvMode: boolean; engine: EnginePhase;
+                players: LobbyPlayer[]; tutorial: { step: number; total: number; acks: string[] } | null;
+                setup: RaceSetup; pause: PhoneState['pause']; gp: PhoneState['gp']; racesCompleted: number },
+  setTvMode(on: boolean): void,
+  skipTutorial(): void,
+}
+```

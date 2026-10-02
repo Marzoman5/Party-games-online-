@@ -12,3 +12,9 @@ dist/
 .vite/
 *.log
 .DS_Store
+
+# kart party
+dist-server/
+certs/
+test-results/
+playwright-report/

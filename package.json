@@ -1,20 +1,35 @@
 {
-  "name": "turbo-kart-rush",
+  "name": "kart-party",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "TURBO KART RUSH - a AAA-quality Mario Kart style arcade racer built with Three.js. Fully procedural: no external assets.",
+  "description": "Kart Party - couch-multiplayer arcade kart racer. The game runs on a laptop/TV, phones are the controllers.",
+  "license": "MIT",
   "scripts": {
-    "dev": "vite --host",
-    "build": "vite build",
-    "preview": "vite preview --host",
-    "typecheck": "tsc --noEmit"
+    "start": "npm run build && node dist-server/server.mjs",
+    "start:https": "npm run build && node dist-server/server.mjs --https",
+    "serve": "node dist-server/server.mjs",
+    "build": "vite build && node scripts/build-server.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "playwright test",
+    "bots": "tsx scripts/bots.ts"
   },
   "dependencies": {
-    "three": "^0.185.1"
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "selfsigned": "^2.4.1",
+    "three": "^0.185.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
     "@types/three": "^0.185.4",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.19.2",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
   }
