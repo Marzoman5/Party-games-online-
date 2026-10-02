@@ -1,5 +1,5 @@
 /**
- * Kart Party — party-layer tuning knobs and small shared helpers.
+ * Party engine — tuning knobs and small shared helpers (all games).
  * Everything time-related for the party flow lives here so it is easy to tweak.
  */
 import { DEFAULT_PORT, WS_PATH } from '../net/protocol';
@@ -11,6 +11,8 @@ export const TUTORIAL_STEPS = 6;
 export const TUTORIAL_ACK_WAIT_MS = 10_000;
 /** Tutorial: short beat after everyone acked so the last checkmark is visible. */
 export const TUTORIAL_ALL_ACKED_DELAY_MS = 1200;
+/** Sandbox: short beat after the last "I'm ready" so the retire puff is visible. */
+export const SANDBOX_ALL_DONE_DELAY_MS = 1200;
 /** In-race status packets to phones (~10 Hz). */
 export const RACE_STATUS_MS = 100;
 /** GP points by finishing place (1st..8th). */

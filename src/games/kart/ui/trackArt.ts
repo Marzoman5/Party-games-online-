@@ -2,8 +2,8 @@
  * Track minimap outline drawn from the track definition's control points (x/z plane),
  * smoothed with a centripetal-ish Catmull-Rom → cubic Bézier conversion. Inline SVG.
  */
-import type { TrackDefinition } from '../../core/types';
-import { hex, shade } from './dom';
+import type { TrackDefinition } from '../../../core/types';
+import { hex, shade } from '../../../party/ui/dom';
 
 const THEME_GRADIENTS: Record<string, [string, string]> = {
   grassland: ['#38c172', '#1e7fd6'],

@@ -3,8 +3,8 @@
  * Racers are keyed by identity so totals survive across races: humans by playerId,
  * AI racers by name (the engine fills AI seats with the remaining roster).
  */
-import type { ResultRow } from '../net/protocol';
-import { GP_POINTS } from './config';
+import type { ResultRow } from '../../net/protocol';
+import { GP_POINTS } from '../../engine/config';
 
 export interface GpEntry {
   key: string;

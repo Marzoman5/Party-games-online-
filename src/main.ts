@@ -1,8 +1,10 @@
 /**
- * Kart Party bootstrap: WebGL2 detection, global error toasts, then the engine (Game, an
- * IGameHost) and the party layer (PartyApp: phones-as-controllers, lobby, tutorial, overlays).
+ * Party Hub bootstrap: WebGL2 detection, global error toasts, then the Kart Party engine (Game, an
+ * IGameHost — eager, it is the default game), the game modules (src/games/registry.ts; Smash Party's
+ * engine is loaded lazily the first time it is picked) and the party shell (PartyApp:
+ * phones-as-controllers, hub lobby + game picker, tutorial, overlays).
  *
- * Dev/test only: `?stub=1` swaps the engine for a lightweight stub (src/party/dev/StubGame.ts,
+ * Dev/test only: `?stub=1` swaps the kart engine for a lightweight stub (src/party/dev/StubGame.ts,
  * loaded via dynamic import so it never runs in a normal session).
  */
 import type { IGameHost } from './game/api';
@@ -28,7 +30,7 @@ function showFatal(title: string, body: string): void {
   panel.className = 'kp-fatal-panel';
   const kicker = document.createElement('div');
   kicker.className = 'kp-fatal-kicker';
-  kicker.textContent = 'KART PARTY';
+  kicker.textContent = 'PARTY HUB';
   const h = document.createElement('h2');
   h.textContent = title;
   const p = document.createElement('p');
@@ -88,7 +90,7 @@ async function boot(): Promise<void> {
   if (!stub && !hasWebGL2()) {
     showFatal(
       'WEBGL2 REQUIRED',
-      'Kart Party needs a browser with WebGL 2 and hardware acceleration enabled. ' +
+      'Party Hub needs a browser with WebGL 2 and hardware acceleration enabled. ' +
         'Try the latest Chrome, Edge, Firefox or Safari, and make sure GPU acceleration is switched on.',
     );
     return;
@@ -110,8 +112,8 @@ async function boot(): Promise<void> {
   }
 
   try {
-    const { PartyApp } = await import('./party/PartyApp');
-    const party = new PartyApp(game);
+    const [{ PartyApp }, { createGameModules }] = await Promise.all([import('./party/PartyApp'), import('./games/registry')]);
+    const party = new PartyApp(createGameModules({ kart: game, container: app }));
     (window as unknown as { __partyApp?: unknown }).__partyApp = party;
   } catch (err) {
     console.error('[main] failed to start the party layer', err);

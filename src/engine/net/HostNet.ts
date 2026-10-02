@@ -5,13 +5,14 @@
  *   (or a server blip) reclaims the same room code and its players.
  * - Auto-reconnects with exponential backoff; pings the server and treats a silent socket
  *   as dead (laptop sleep, Wi-Fi hiccup) so recovery is quick.
- * - Input packets (JSON arrays) are decoded and handed out IMMEDIATELY (no batching).
+ * - Input packets (JSON arrays) are decoded and handed out IMMEDIATELY (no batching). Both tags
+ *   are understood: `[0, …kart…, playerId]` and `[1, …fighter…, playerId]` (playerId = last element).
  * - Control messages are dispatched to the handler (the PartySession).
  */
 import {
   PROTOCOL_VERSION,
+  decodeFightInput,
   decodeInput,
-  type DecodedInput,
   type HostHello,
   type HostToPhone,
   type HostWelcome,
@@ -28,6 +29,7 @@ import {
   storageGet,
   storageSet,
 } from '../config';
+import type { AnyInput } from '../GameModule';
 
 export type NetStatus = 'connecting' | 'open' | 'down' | 'replaced';
 
@@ -36,7 +38,8 @@ export interface HostNetHandler {
   onPlayerJoined(playerId: string, rejoin: boolean): void;
   onPlayerLeft(playerId: string): void;
   onPhoneMessage(playerId: string, m: PhoneToHost): void;
-  onInput(playerId: string, input: DecodedInput): void;
+  /** A relayed input packet (tag 0 = kart, tag 1 = fighter), decoded. */
+  onInput(playerId: string, input: AnyInput): void;
   onStatus(status: NetStatus): void;
   onServerError(e: ServerError): void;
 }
@@ -150,7 +153,9 @@ export class HostNet implements NetPort {
   // ------------------------------------------------------------------ internals
 
   private onFrame(data: string): void {
-    // Fast path: relayed input packet `[0, seq, steer, throttle, brake, buttons, itemPresses, playerId]`.
+    // Fast path: relayed input packets
+    //   kart    `[0, seq, steer, throttle, brake, buttons, itemPresses, playerId]`
+    //   fighter `[1, seq, x, y, buttons, a, s, j, g, playerId]`
     if (data.charCodeAt(0) === 91 /* [ */) {
       let arr: unknown;
       try {
@@ -158,11 +163,16 @@ export class HostNet implements NetPort {
       } catch {
         return;
       }
-      if (!Array.isArray(arr)) return;
-      const pid = arr[7];
+      if (!Array.isArray(arr) || arr.length < 2) return;
+      const pid = arr[arr.length - 1];
       if (typeof pid !== 'string') return;
-      const input = decodeInput(arr);
-      if (input) this.handler.onInput(pid, input);
+      if (arr[0] === 0) {
+        const input = decodeInput(arr);
+        if (input) this.handler.onInput(pid, { tag: 0, input });
+      } else if (arr[0] === 1) {
+        const input = decodeFightInput(arr);
+        if (input) this.handler.onInput(pid, { tag: 1, input });
+      }
       return;
     }
     let msg: ServerToHost;

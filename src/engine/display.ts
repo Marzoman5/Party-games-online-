@@ -2,7 +2,6 @@
  * Display concerns owned by PARTY: TV mode (`html.tv`, --ui-scale, --safe), fullscreen,
  * and cursor hiding during races.
  */
-import type { IGameHost } from '../game/api';
 import { CURSOR_SHOW_MS, STORAGE, params, storageGet, storageSet } from './config';
 
 export class Display {
@@ -13,7 +12,11 @@ export class Display {
   private readonly listeners: (() => void)[] = [];
   onChange: (() => void) | null = null;
 
-  constructor(private readonly game: IGameHost) {
+  /**
+   * @param applyTv called with the new TV-mode flag (the session forwards it to every loaded
+   *        game engine so their HUDs scale too).
+   */
+  constructor(private readonly applyTv: (on: boolean) => void) {
     const q = params().get('tv');
     let on: boolean;
     if (q === '1') on = true;
@@ -44,7 +47,7 @@ export class Display {
     root.style.setProperty('--safe', on ? '5vh' : '0px');
     if (persist) storageSet('local', STORAGE.tv, on ? '1' : '0');
     try {
-      this.game.setTvMode(on);
+      this.applyTv(on);
     } catch (err) {
       console.warn('[party] setTvMode failed', err);
     }

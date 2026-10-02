@@ -1,10 +1,9 @@
 /**
- * RACE / LOADING — the engine draws the HUD; the party layer only adds a tiny room-code chip
- * (so latecomers can still join) and, while loading, a line-up strip of the human racers.
+ * RACE / LOADING (any game) — the engine draws the HUD; the party layer only adds a tiny
+ * room-code chip (so latecomers can still join) and, while loading, a line-up strip of the humans.
  */
 import { SLOT_COLORS } from '../../net/protocol';
-import { getTrackDef } from '../../track/tracks/index';
-import type { PartySession } from '../PartySession';
+import type { PartySession } from '../../engine/PartySession';
 import type { ScreenView, UiContext } from './HostUI';
 import { AvatarView } from './avatar';
 import { h, setText, toggle } from './dom';
@@ -28,22 +27,19 @@ export class RaceOverlay implements ScreenView {
   update(s: PartySession): void {
     this.root.dataset.tid = s.screen === 'loading' ? 'screen-loading' : 'screen-race';
     setText(this.code, s.room);
-    const late = s.players.filter((p) => p.connected && !(s.race && s.race.kartOf.has(p.playerId)));
-    setText(this.waiting, late.length ? ` · ${late.map((p) => p.name).join(', ')} racing next time` : '');
+    const late = s.players.filter((p) => p.connected && !(s.match && s.match.slotOf.has(p.playerId)));
+    setText(this.waiting, late.length ? ` · ${late.map((p) => p.name).join(', ')} playing next time` : '');
 
     // Only while the engine is still building the track: its intro flyover has its own title card.
     const loading = s.game.phase === 'loading';
-    toggle(this.lineup, 'kp-on', loading && !!s.race);
-    if (s.race) {
+    toggle(this.lineup, 'kp-on', loading && !!s.match);
+    if (s.match) {
       const racers = s.racers;
-      const key = racers.map((p) => `${p.playerId}:${p.characterId}:${p.name}`).join('|') + s.race.trackId;
+      const label = s.game.matchLabel();
+      const key = racers.map((p) => `${p.playerId}:${p.characterId}:${p.name}`).join('|') + label;
       if (key !== this.lineupKey) {
         this.lineupKey = key;
-        const gp = s.gpView;
-        setText(
-          this.lineupTitle,
-          `${gp ? `GRAND PRIX · RACE ${gp.race}/${gp.of} · ` : ''}${getTrackDef(s.race.trackId).name.toUpperCase()}`,
-        );
+        setText(this.lineupTitle, label);
         this.lineupRow.replaceChildren(
           ...racers.map((p) => {
             const a = new AvatarView('kp-lineup-avatar');

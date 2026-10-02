@@ -2,7 +2,7 @@
  * PAUSED — who paused, resume vote pips (x/y), and host mouse fallbacks.
  */
 import { SLOT_COLORS } from '../../net/protocol';
-import type { PartySession } from '../PartySession';
+import type { PartySession } from '../../engine/PartySession';
 import type { ScreenView, UiContext } from './HostUI';
 import { button, h, setText } from './dom';
 
@@ -12,6 +12,7 @@ export class PauseOverlay implements ScreenView {
   private readonly votes = h('div', 'kp-votes');
   private readonly voteText = h('div', 'kp-vote-text');
   private readonly hint = h('div', 'kp-pause-hint');
+  private readonly game = h('div', 'kp-pause-game');
 
   constructor(ctx: UiContext) {
     const s = ctx.session;
@@ -22,6 +23,7 @@ export class PauseOverlay implements ScreenView {
       h(
         'div',
         { class: 'kp-panel kp-pause-panel', 'data-tid': 'pause-overlay' },
+        this.game,
         h('div', 'kp-pause-title', 'PAUSED'),
         this.by,
         this.votes,
@@ -42,6 +44,7 @@ export class PauseOverlay implements ScreenView {
     const p = s.pause;
     if (!p) return;
     setText(this.by, `Paused by ${p.by}`);
+    setText(this.game, `${s.game.info.emoji} ${s.game.info.title.toUpperCase()}`);
     const needed = s.resumeNeeded;
     const n = p.voters.size;
     if (this.votes.childElementCount !== needed) {

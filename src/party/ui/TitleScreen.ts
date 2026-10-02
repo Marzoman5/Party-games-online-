@@ -1,15 +1,17 @@
 /**
- * TITLE — "KART PARTY" logo over the live demo race, a BIG QR code, the room code, the
- * join URL fallback, and "Press ENTER for keyboard solo".
+ * TITLE — "PARTY HUB" logo + both game logos over the active game's live attract demo, a BIG QR
+ * code, the room code, the join URL fallback, and "Press ENTER for keyboard solo" (Kart Party).
  */
-import type { PartySession } from '../PartySession';
+import { GAME_IDS } from '../../net/protocol';
+import type { PartySession } from '../../engine/PartySession';
 import type { ScreenView, UiContext } from './HostUI';
 import { h, setText, toggle } from './dom';
+import { gameLogoMarkup } from './gameArt';
 import { QrView, baseJoinUrl } from './qr';
 
 export function logoMarkup(): string {
-  return `<div class="kp-logo" aria-label="Kart Party">
-    <span class="kp-logo-kart">KART</span><span class="kp-logo-party">PARTY</span>
+  return `<div class="kp-logo" aria-label="Party Hub">
+    <span class="kp-logo-kart">PARTY</span><span class="kp-logo-party">HUB</span>
     <span class="kp-logo-flag" aria-hidden="true"></span>
   </div>`;
 }
@@ -22,6 +24,7 @@ export class TitleScreen implements ScreenView {
   private readonly urlCode: HTMLSpanElement;
   private readonly status: HTMLDivElement;
   private readonly card: HTMLDivElement;
+  private readonly solo: HTMLButtonElement;
 
   constructor(private readonly ctx: UiContext) {
     this.qr = new QrView(ctx.apiBase, 'kp-qr-big');
@@ -33,7 +36,12 @@ export class TitleScreen implements ScreenView {
 
     const left = h('div', 'kp-title-left');
     left.innerHTML = logoMarkup();
+    const games = h('div', 'kp-title-games');
+    games.innerHTML = GAME_IDS.filter((id) => ctx.session.modules[id])
+      .map((id) => gameLogoMarkup(ctx.session.modules[id].info))
+      .join('<span class="kp-title-plus">+</span>');
     left.append(
+      games,
       h('div', 'kp-tagline', 'Grab your phone — it’s your controller!'),
       h(
         'ol',
@@ -60,12 +68,13 @@ export class TitleScreen implements ScreenView {
     );
 
     const solo = h('button', { class: 'kp-solo', type: 'button' });
-    solo.innerHTML = 'Press <kbd>ENTER</kbd> for keyboard solo';
+    solo.innerHTML = 'Press <kbd>ENTER</kbd> for keyboard solo (Kart Party)';
     solo.addEventListener('click', (e) => {
       e.stopPropagation();
       ctx.session.hostOpenSolo();
     });
 
+    this.solo = solo;
     this.root = h(
       'div',
       { class: 'kp-title', 'data-tid': 'screen-title' },
@@ -76,6 +85,7 @@ export class TitleScreen implements ScreenView {
   }
 
   update(s: PartySession): void {
+    toggle(this.solo, 'kp-hidden', !s.modules.kart);
     this.qr.set(s.joinUrl);
     setText(this.code, s.room || '····');
     setText(this.url, s.joinUrl ? baseJoinUrl(s.joinUrl) : '…');

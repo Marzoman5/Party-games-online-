@@ -64,7 +64,18 @@ export class StubGame implements IGameHost {
     this.timers = [];
   }
 
+  /** PARTY HUB: hide the stub canvas while another game is active. */
+  setSuspended(on: boolean): void {
+    this.canvas.style.display = on ? 'none' : '';
+    if (on) {
+      this.clear();
+      this.cfg = null;
+      this.set('idle');
+    }
+  }
+
   showDemo(): void {
+    this.canvas.style.display = '';
     this.clear();
     this.cfg = null;
     this.set('demo');

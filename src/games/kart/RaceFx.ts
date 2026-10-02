@@ -1,22 +1,18 @@
 /**
- * RaceFx — maps engine event-bus events to PhoneFx one-shots (haptics / sfx on the phone)
- * for the kart's owner. Subscribed once for the session lifetime; every handler checks the
- * current race's kart → player map, and dispose() unsubscribes everything.
+ * RaceFx — maps kart engine event-bus events to PhoneFx one-shots (haptics / sfx on the phone)
+ * for the kart's owner. Subscribed once for the session lifetime; every handler checks that kart
+ * is the active game and the current match's seat → player map; dispose() unsubscribes.
  */
-import { events } from '../core/events';
-import type { PhoneFx } from '../net/protocol';
-import type { NetPort } from './net/HostNet';
-import type { PartySession } from './PartySession';
+import { events } from '../../core/events';
+import type { PhoneFx } from '../../net/protocol';
+import type { PartySession } from '../../engine/PartySession';
 
 export class RaceFx {
   private readonly offs: (() => void)[] = [];
   /** Last 'hit' per kart, to merge item:hit + kart:spin for the same impact. */
   private readonly lastHit = new Map<number, number>();
 
-  constructor(
-    private readonly s: PartySession,
-    private readonly net: NetPort,
-  ) {
+  constructor(private readonly s: PartySession) {
     const on = events.on.bind(events);
     this.offs.push(
       on('item:hit', (e) => this.hit(e.kartId)),
@@ -30,9 +26,9 @@ export class RaceFx {
       }),
       on('item:rouletteEnd', (e) => this.send(e.kartId, 'item')),
       on('race:start', () => {
-        const race = this.s.race;
-        if (!race) return;
-        for (let k = 0; k < race.playerOfKart.length; k++) this.send(k, 'go');
+        const m = this.s.match;
+        if (!m) return;
+        for (let k = 0; k < m.playerOfSlot.length; k++) this.send(k, 'go');
       }),
       on('race:finish', (e) => this.send(e.kartId, 'finish')),
       on('kart:boost', (e) => {
@@ -52,14 +48,12 @@ export class RaceFx {
 
   private send(kartId: number, kind: PhoneFx['kind']): void {
     const s = this.s;
-    const race = s.race;
-    if (!race || s.soloActive) return;
+    const m = s.match;
+    if (!m || m.kind !== 'match' || m.game !== 'kart' || s.gameId !== 'kart' || s.soloActive) return;
     if (s.screen !== 'race' && s.screen !== 'loading') return;
-    const pid = race.playerOfKart[kartId];
-    if (!pid) return;
-    const p = s.player(pid);
-    if (!p || !p.connected) return;
-    this.net.sendTo(pid, { t: 'fx', kind });
+    const p = s.connectedAtSeat(kartId);
+    if (!p) return;
+    s.send(p.playerId, { t: 'fx', kind });
   }
 
   dispose(): void {

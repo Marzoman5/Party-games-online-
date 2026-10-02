@@ -1,20 +1,20 @@
 /**
- * HostUI — owns the `#party` overlay root (z-index 50, above the engine HUD) and swaps the
- * per-screen overlays. All screens are built once and re-used (no DOM churn across races).
+ * HostUI — owns the `#party` overlay root (z-index 50, above the engine HUDs) and swaps the
+ * per-screen overlays. Generic screens (title, lobby/hub, tutorial, race chip, pause) are shared
+ * by every game; setup / results / sandbox (and optionally race) views come from the active
+ * game module (`GameModule.createViews`). All views are built once and re-used.
  *
  * Test ids: each screen marks its elements with `data-tid`; only the ACTIVE screen gets real
  * `data-testid`s so Playwright locators never match a hidden duplicate.
  */
-import type { ScreenId } from '../../net/protocol';
-import type { PartySession } from '../PartySession';
-import type { Display } from '../display';
+import type { GameId, ScreenId } from '../../net/protocol';
+import type { PartySession } from '../../engine/PartySession';
+import type { Display } from '../../engine/display';
 import { button, h, setText, toggle } from './dom';
 import { TitleScreen } from './TitleScreen';
 import { LobbyScreen } from './LobbyScreen';
 import { TutorialScreen } from './TutorialScreen';
-import { SetupScreen } from './SetupScreen';
 import { PauseOverlay } from './PauseOverlay';
-import { ResultsOverlay } from './ResultsOverlay';
 import { RaceOverlay } from './RaceOverlay';
 
 export interface UiContext {
@@ -33,11 +33,15 @@ export interface ScreenView {
   dispose?(): void;
 }
 
-type ViewKey = 'title' | 'lobby' | 'tutorial' | 'setup' | 'race' | 'paused' | 'results' | 'none';
+type CommonKey = 'title' | 'lobby' | 'tutorial' | 'race' | 'paused';
+type ModuleKey = 'setup' | 'results' | 'sandbox' | 'race';
+/** 'title' … or `${game}:${moduleKey}` or 'none'. */
+type ViewKey = string;
 
 export class HostUI {
   readonly root: HTMLDivElement;
-  private readonly views: Record<Exclude<ViewKey, 'none'>, ScreenView>;
+  private readonly common: Record<CommonKey, ScreenView>;
+  private readonly moduleViews = new Map<string, ScreenView>();
   private active: ViewKey = 'none';
   private readonly toolbar: HTMLDivElement;
   private readonly tvBtn: HTMLButtonElement;
@@ -45,27 +49,39 @@ export class HostUI {
   private readonly banner: HTMLDivElement;
   private readonly bannerText: HTMLSpanElement;
   private readonly replaced: HTMLDivElement;
+  private readonly loadingGame: HTMLDivElement;
+  private readonly loadingGameText = h('span');
   private renderQueued = 0;
   private bannerSince = 0;
 
   constructor(private readonly ctx: UiContext) {
     this.root = h('div', { id: 'party', class: 'kp-root' });
     const s = ctx.session;
-    this.views = {
+    this.common = {
       title: new TitleScreen(ctx),
       lobby: new LobbyScreen(ctx),
       tutorial: new TutorialScreen(ctx),
-      setup: new SetupScreen(ctx),
       race: new RaceOverlay(ctx),
       paused: new PauseOverlay(ctx),
-      results: new ResultsOverlay(ctx),
     };
-    for (const v of Object.values(this.views)) {
-      v.root.classList.add('kp-screen');
-      this.root.appendChild(v.root);
+    for (const v of Object.values(this.common)) this.add(v);
+    for (const id of Object.keys(s.modules) as GameId[]) {
+      let views;
+      try {
+        views = s.modules[id].createViews(ctx);
+      } catch (err) {
+        console.error(`[party] ${id} views failed`, err);
+        continue;
+      }
+      for (const [k, v] of Object.entries(views) as [ModuleKey, ScreenView | undefined][]) {
+        if (!v) continue;
+        v.root.dataset.game = id;
+        this.moduleViews.set(`${id}:${k}`, v);
+        this.add(v);
+      }
     }
 
-    // Shared toolbar (title / lobby / setup / results).
+    // Shared toolbar (title / lobby / setup).
     const howto = button('<span class="kp-ico">❓</span> How to Play', 'kp-tool', () => s.hostHowTo(), 'btn-howto');
     this.tvBtn = button('', 'kp-tool', () => ctx.display.toggleTv(), 'btn-tv');
     this.fsBtn = button('', 'kp-tool', () => ctx.display.toggleFullscreen(), 'btn-fullscreen');
@@ -77,6 +93,10 @@ export class HostUI {
     this.banner = h('div', { class: 'kp-banner', 'data-testid': 'net-banner' }, h('span', 'kp-spinner'), this.bannerText);
     this.root.appendChild(this.banner);
 
+    // Lazy game engine loading (game switch).
+    this.loadingGame = h('div', { class: 'kp-banner kp-banner-game', 'data-testid': 'game-loading' }, h('span', 'kp-spinner'), this.loadingGameText);
+    this.root.appendChild(this.loadingGame);
+
     // "Opened in another tab" blocker.
     this.replaced = h(
       'div',
@@ -84,7 +104,7 @@ export class HostUI {
       h(
         'div',
         'kp-panel kp-replaced-panel',
-        h('div', { class: 'kp-h2', text: 'Kart Party is open in another tab' }),
+        h('div', { class: 'kp-h2', text: 'Party Hub is open in another tab' }),
         h('p', { text: 'Only one screen can host the party. Close the other tab, or take over here.' }),
         button('Use this tab', 'kp-primary', () => ctx.reclaim()),
       ),
@@ -94,27 +114,40 @@ export class HostUI {
     ctx.display.onChange = () => this.render();
   }
 
-  /** Coalesce renders to one per animation frame. */
+  private add(v: ScreenView): void {
+    v.root.classList.add('kp-screen');
+    this.root.appendChild(v.root);
+  }
+
+  private view(key: ViewKey): ScreenView | null {
+    if (key === 'none') return null;
+    return (this.common as Record<string, ScreenView>)[key] ?? this.moduleViews.get(key) ?? null;
+  }
+
+  /**
+   * Coalesce renders (one per task). A macrotask rather than requestAnimationFrame: on slow GPUs
+   * the WebGL frame can take ~1 s, and the overlays (and their testids) must not lag behind state.
+   */
   render(): void {
     if (this.renderQueued) return;
-    this.renderQueued = requestAnimationFrame(() => {
+    this.renderQueued = window.setTimeout(() => {
       this.renderQueued = 0;
       this.renderNow();
-    });
+    }, 0);
   }
 
   renderNow(): void {
     const s = this.ctx.session;
     const key = this.viewFor(s.screen, s);
     if (key !== this.active) {
-      const prev = this.active !== 'none' ? this.views[this.active] : null;
+      const prev = this.view(this.active);
       if (prev) {
         prev.root.classList.remove('kp-on');
         this.setTestIds(prev.root, false);
         prev.hide?.();
       }
       this.active = key;
-      const next = key !== 'none' ? this.views[key] : null;
+      const next = this.view(key);
       if (next) {
         next.update(s);
         next.root.classList.add('kp-on');
@@ -122,15 +155,18 @@ export class HostUI {
         next.show?.();
       }
     }
-    if (this.active !== 'none') {
-      this.views[this.active].update(s);
-      this.setTestIds(this.views[this.active].root, true);
+    const cur = this.view(this.active);
+    if (cur) {
+      cur.update(s);
+      this.setTestIds(cur.root, true);
     }
+    document.documentElement.dataset.game = s.gameId;
 
     const d = this.ctx.display;
-    const toolbarOn = !s.soloActive && (key === 'title' || key === 'lobby' || key === 'setup');
+    const base = key.includes(':') ? key.split(':')[1] : key;
+    const toolbarOn = !s.soloActive && (base === 'title' || base === 'lobby' || base === 'setup');
     toggle(this.toolbar, 'kp-on', toolbarOn);
-    toggle(this.toolbar, 'kp-toolbar-low', key === 'setup');
+    toggle(this.toolbar, 'kp-toolbar-low', base === 'setup');
     this.tvBtn.innerHTML = `<span class="kp-ico">📺</span> TV mode: <b>${d.tvMode ? 'ON' : 'OFF'}</b>`;
     this.fsBtn.innerHTML = `<span class="kp-ico">⛶</span> ${d.isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} <kbd>F</kbd>`;
 
@@ -141,15 +177,23 @@ export class HostUI {
     toggle(this.banner, 'kp-on', down);
     setText(this.bannerText, 'Reconnecting to game server…');
     toggle(this.replaced, 'kp-on', s.netStatus === 'replaced');
+    toggle(this.loadingGame, 'kp-on', !!s.switching);
+    if (s.switching) setText(this.loadingGameText, `Loading ${s.modules[s.switching].info.title}…`);
 
-    // Cursor: hidden while the engine is loading / flying in / counting down / racing.
-    const ph = s.game.phase;
-    const racingish = ph === 'loading' || ph === 'intro' || ph === 'countdown' || ph === 'racing' || ph === 'finished';
+    // Cursor: hidden while the engine is loading / flying in / counting down / playing.
+    let racingish = false;
+    try {
+      racingish = s.game.isLive() || s.game.phase === 'loading';
+    } catch {
+      racingish = false;
+    }
     d.setCursorHidden(racingish && (s.screen === 'race' || s.screen === 'loading' || s.soloActive));
   }
 
   private viewFor(screen: ScreenId, s: PartySession): ViewKey {
     if (s.soloActive) return 'none';
+    const g = s.gameId;
+    const mod = (k: ModuleKey, fallback: ViewKey): ViewKey => (this.moduleViews.has(`${g}:${k}`) ? `${g}:${k}` : fallback);
     switch (screen) {
       case 'title':
         return 'title';
@@ -159,14 +203,16 @@ export class HostUI {
       case 'tutorial':
         return 'tutorial';
       case 'setup':
-        return 'setup';
+        return mod('setup', 'lobby');
+      case 'sandbox':
+        return mod('sandbox', 'race');
       case 'loading':
       case 'race':
-        return 'race';
+        return mod('race', 'race');
       case 'paused':
         return 'paused';
       case 'results':
-        return 'results';
+        return s.results && s.results.game !== g ? 'lobby' : mod('results', 'lobby');
     }
     return 'none';
   }
@@ -185,18 +231,19 @@ export class HostUI {
   }
 
   /** Visual feedback for the "try it" moment (lobby + tutorial). */
-  tryIt(playerId: string, kind: 'drift' | 'item'): void {
-    const v = this.active === 'tutorial' ? this.views.tutorial : this.active === 'lobby' ? this.views.lobby : null;
-    (v as unknown as { tryIt?: (id: string, k: 'drift' | 'item') => void } | null)?.tryIt?.(playerId, kind);
+  tryIt(playerId: string, kind: 'drift' | 'item', label: string): void {
+    const v = this.active === 'tutorial' ? this.common.tutorial : this.active === 'lobby' ? this.common.lobby : null;
+    (v as unknown as { tryIt?: (id: string, k: 'drift' | 'item', l: string) => void } | null)?.tryIt?.(playerId, kind, label);
   }
 
   tutorialStep(): void {
-    (this.views.tutorial as TutorialScreen).onStep();
+    (this.common.tutorial as TutorialScreen).onStep();
   }
 
   dispose(): void {
-    cancelAnimationFrame(this.renderQueued);
-    for (const v of Object.values(this.views)) v.dispose?.();
+    window.clearTimeout(this.renderQueued);
+    for (const v of Object.values(this.common)) v.dispose?.();
+    for (const v of this.moduleViews.values()) v.dispose?.();
     this.ctx.display.onChange = null;
     this.root.remove();
   }

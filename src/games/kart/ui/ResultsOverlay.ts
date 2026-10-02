@@ -2,18 +2,19 @@
  * RESULTS — podium + full standings with slot colours and times; GP points & totals; after
  * the 4th GP race, the final GP podium with CSS confetti. "Leader picks what's next".
  */
-import { SLOT_COLORS, type ResultRow } from '../../net/protocol';
-import { TRACKS, getTrackDef } from '../../track/tracks/index';
-import { formatTime, ordinal } from '../config';
-import type { PartySession, ResultsState } from '../PartySession';
-import type { ScreenView, UiContext } from './HostUI';
-import { avatarSvg } from './avatar';
-import { button, esc, h, setText, toggle } from './dom';
-import { getCharacter } from '../../kart/roster';
+import { SLOT_COLORS, type ResultRow } from '../../../net/protocol';
+import { TRACKS, getTrackDef } from '../../../track/tracks/index';
+import { formatTime, ordinal } from '../../../engine/config';
+import type { PartySession, ResultsState } from '../../../engine/PartySession';
+import type { KartModule } from '../KartModule';
+import type { ScreenView, UiContext } from '../../../party/ui/HostUI';
+import { avatarSvg } from '../../../party/ui/avatar';
+import { button, esc, h, setText, toggle } from '../../../party/ui/dom';
+import { getCharacter } from '../../../kart/roster';
 
 const PODIUM_ORDER = [1, 0, 2]; // 2nd, 1st, 3rd
 
-export class ResultsOverlay implements ScreenView {
+export class KartResultsOverlay implements ScreenView {
   readonly root: HTMLDivElement;
   private readonly kicker = h('div', 'kp-kicker');
   private readonly title = h('div', 'kp-h1');
@@ -22,11 +23,16 @@ export class ResultsOverlay implements ScreenView {
   private readonly who = h('div', 'kp-results-who');
   private readonly confetti = h('div', 'kp-confetti');
   private readonly nextBtn: HTMLButtonElement;
+  private readonly switchBtn: HTMLButtonElement;
   private shown: ResultsState | null = null;
 
-  constructor(ctx: UiContext) {
+  constructor(
+    ctx: UiContext,
+    private readonly kart: KartModule,
+  ) {
     const s = ctx.session;
     this.nextBtn = button('Next ▶', 'kp-primary', () => s.hostPost('next'), 'btn-next');
+    this.switchBtn = button('Switch game', 'kp-switch', () => s.hostPost('switch'), 'btn-switch');
     for (let i = 0; i < 36; i++) {
       const c = h('i');
       c.style.setProperty('--x', `${Math.random() * 100}%`);
@@ -56,6 +62,7 @@ export class ResultsOverlay implements ScreenView {
             this.nextBtn,
             button('↻ Replay', '', () => s.hostPost('replay'), 'btn-replay'),
             button('Change track', '', () => s.hostPost('track'), 'btn-track'),
+            this.switchBtn,
             button('Lobby', '', () => s.hostPost('lobby'), 'btn-lobby'),
           ),
         ),
@@ -67,19 +74,23 @@ export class ResultsOverlay implements ScreenView {
     const r = s.results;
     const leader = s.leader;
     setText(this.who, leader ? `${leader.name} picks what’s next on their phone` : 'The leader picks what’s next');
-    if (!r) return;
-    const gp = s.gp;
+    if (!r || r.game !== 'kart') return;
+    const gp = this.kart.gp;
+    const trackId = typeof r.meta.trackId === 'string' ? r.meta.trackId : this.kart.trackId;
     const final = r.gpFinal && !!gp;
     if (gp) this.nextBtn.innerHTML = final ? 'New Grand Prix ▶' : `Next race ▶ <small>${esc(TRACKS[gp.race % TRACKS.length].name)}</small>`;
     else {
-      const i = TRACKS.findIndex((t) => t.id === r.trackId);
+      const i = TRACKS.findIndex((t) => t.id === trackId);
       this.nextBtn.innerHTML = `Next track ▶ <small>${esc(TRACKS[(i + 1) % TRACKS.length].name)}</small>`;
     }
     toggle(this.root, 'kp-final', final);
+    const other = s.otherGame();
+    toggle(this.switchBtn, 'kp-hidden', !other);
+    if (other) this.switchBtn.innerHTML = `${s.modules[other].info.emoji} Play ${esc(s.modules[other].info.title)}`;
     if (r === this.shown) return;
     this.shown = r;
 
-    const track = getTrackDef(r.trackId);
+    const track = getTrackDef(trackId);
     if (final && gp) {
       setText(this.kicker, 'GRAND PRIX · FINAL STANDINGS');
       const st = gp.standings();
@@ -147,7 +158,7 @@ export class ResultsOverlay implements ScreenView {
     this.table.replaceChildren(head, ...list);
   }
 
-  private renderGpTable(st: ReturnType<NonNullable<PartySession['gp']>['standings']>, of: number): void {
+  private renderGpTable(st: ReturnType<NonNullable<KartModule['gp']>['standings']>, of: number): void {
     const head = h(
       'div',
       'kp-row kp-row-head',

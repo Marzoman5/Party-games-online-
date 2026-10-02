@@ -1,16 +1,16 @@
 /**
- * PartyApp — wires the engine (IGameHost), the relay connection (HostNet), the party state
- * machine (PartySession), the host overlays (HostUI), TV mode / fullscreen / cursor (Display),
- * host keyboard shortcuts, toasts and the `window.__party` test hooks.
+ * PartyApp — the Party Hub host shell: wires the game modules (src/games/registry.ts), the relay
+ * connection (HostNet), the party state machine (PartySession), the host overlays (HostUI),
+ * TV mode / fullscreen / cursor (Display), host keyboard shortcuts, toasts and the
+ * `window.__party` test hooks.
  */
-import type { IGameHost } from '../game/api';
-import type { EnginePhase } from '../game/api';
-import type { LobbyPlayer, PhoneState, RaceSetup, ScreenId } from '../net/protocol';
+import type { GameId, GameInfo, LobbyPlayer, PhoneState, RaceSetup, ScreenId } from '../net/protocol';
 import { showToast } from '../ui/toast';
-import { resolveApiBase, resolveWsUrl } from './config';
-import { Display } from './display';
-import { HostNet } from './net/HostNet';
-import { PartySession } from './PartySession';
+import type { GameModule } from '../engine/GameModule';
+import { resolveApiBase, resolveWsUrl } from '../engine/config';
+import { Display } from '../engine/display';
+import { HostNet } from '../engine/net/HostNet';
+import { PartySession } from '../engine/PartySession';
 import { HostUI } from './ui/HostUI';
 import { armSfx } from './ui/sfx';
 
@@ -19,9 +19,11 @@ export interface PartyState {
   room: string;
   joinUrl: string;
   tvMode: boolean;
-  engine: EnginePhase;
+  /** Active game's engine phase. */
+  engine: string;
   players: LobbyPlayer[];
   tutorial: { step: number; total: number; acks: string[]; phase: 'steps' | 'ack' } | null;
+  /** Kart race setup (legacy). */
   setup: RaceSetup;
   pause: PhoneState['pause'];
   gp: PhoneState['gp'];
@@ -31,8 +33,17 @@ export interface PartyState {
   soloActive: boolean;
   tipsEnabled: boolean;
   results: PhoneState['results'];
-  /** kart index → playerId of the current/last race. */
+  /** seat (kart index / fighter index) → playerId of the current/last match. */
   karts: string[];
+  // PARTY HUB
+  game: GameId;
+  games: GameInfo[];
+  gameSetup: Record<string, unknown>;
+  sandbox: { done: string[] } | null;
+  resultsInfo: PhoneState['resultsInfo'];
+  /** A lazy engine is loading (game switch in progress). */
+  switching: GameId | null;
+  tutorialsSeen: GameId[];
 }
 
 export interface PartyHooks {
@@ -42,6 +53,10 @@ export interface PartyHooks {
   /** Extras for tests / debugging. */
   howTo(): void;
   phoneState(playerId: string): PhoneState | null;
+  /** Host-side game pick (same rules as the leader's `{t:'game'}`). Resolves when the switch is done. */
+  pickGame(id: GameId): Promise<boolean>;
+  /** Host Esc on the sandbox. */
+  skipSandbox(): void;
 }
 
 declare global {
@@ -64,7 +79,7 @@ export class PartyApp {
   private readonly offs: (() => void)[] = [];
 
   constructor(
-    readonly game: IGameHost,
+    readonly modules: GameModule[],
     opts: PartyAppOptions = {},
   ) {
     const wsUrl = opts.wsUrl ?? resolveWsUrl();
@@ -83,27 +98,36 @@ export class PartyApp {
         if (e.code !== 'host_gone') console.warn('[party] server error', e);
       },
     });
-    session = new PartySession(game, this.net);
+    session = new PartySession(modules, this.net, 'kart');
     this.session = session;
-    this.display = new Display(game);
+    this.display = new Display((on) => {
+      for (const m of modules) {
+        if (!m.loaded) continue;
+        try {
+          m.setTvMode(on);
+        } catch (err) {
+          console.warn('[party] setTvMode failed', err);
+        }
+      }
+    });
     this.ui = new HostUI({ session, display: this.display, apiBase, reclaim: () => this.net.reclaim() });
     (opts.mount ?? document.body).appendChild(this.ui.root);
-
-    // Engine callbacks.
-    game.onPhaseChange = (ph) => {
-      session.onEnginePhase(ph);
-      this.ui.render();
-    };
-    game.onRaceComplete = (results) => session.onRaceComplete(results);
-    game.onPauseRequest = () => session.onPauseRequest();
-    game.onSoloExit = () => session.onSoloExit();
 
     // Session → UI.
     this.offs.push(
       session.events.on('change', () => this.ui.render()),
       session.events.on('toast', (t) => showToast(t.message, t.kind)),
-      session.events.on('tryIt', (t) => this.ui.tryIt(t.playerId, t.kind)),
+      session.events.on('tryIt', (t) => this.ui.tryIt(t.playerId, t.kind, t.label)),
       session.events.on('tutorialStep', () => this.ui.tutorialStep()),
+      session.events.on('gameChanged', () => {
+        // A freshly loaded engine picks up the current TV mode.
+        try {
+          session.game.setTvMode(this.display.tvMode);
+        } catch {
+          /* ignore */
+        }
+        this.ui.render();
+      }),
       armSfx(),
     );
 
@@ -112,10 +136,12 @@ export class PartyApp {
 
     this.installHooks();
     try {
-      game.showDemo();
+      session.game.activate();
     } catch (err) {
-      console.error('[party] showDemo failed', err);
+      console.error('[party] activate failed', err);
     }
+    // Host page reloaded while another game was active: bring it back.
+    if (session.restoredGame && session.restoredGame !== session.gameId) void session.switchGame(session.restoredGame, false);
     this.ui.renderNow();
     this.net.connect();
   }
@@ -132,6 +158,11 @@ export class PartyApp {
       return;
     }
     if (s.soloActive) return;
+    try {
+      if (s.game.onHostKey?.(e)) return;
+    } catch (err) {
+      console.error('[party] onHostKey failed', err);
+    }
     switch (e.key) {
       case 'Enter':
         if (s.screen === 'title') {
@@ -143,8 +174,11 @@ export class PartyApp {
         if (s.screen === 'tutorial') {
           e.preventDefault();
           s.hostSkipTutorial();
+        } else if (s.screen === 'sandbox') {
+          e.preventDefault();
+          s.hostSkipSandbox();
         }
-        // During races the engine reports Esc via onPauseRequest.
+        // During matches the engine reports Esc via onPauseRequest.
         break;
       case 't':
       case 'T':
@@ -158,6 +192,13 @@ export class PartyApp {
     window.__party = {
       getState: (): PartyState => {
         const t = s.tutorial;
+        const r = s.results;
+        let gameSetup: Record<string, unknown> = {};
+        try {
+          gameSetup = s.game.getSetup();
+        } catch {
+          /* ignore */
+        }
         return {
           screen: s.screen,
           room: s.room,
@@ -173,6 +214,7 @@ export class PartyApp {
             connected: p.connected,
             isLeader: p.isLeader,
             tutorialDone: p.tutorialDone,
+            team: p.team,
           })),
           tutorial: t ? { step: Math.min(t.step, t.total - 1), total: t.total, acks: s.tutorialAcks, phase: t.phase } : null,
           setup: { ...s.setup },
@@ -182,8 +224,15 @@ export class PartyApp {
           net: s.netStatus,
           soloActive: s.soloActive,
           tipsEnabled: s.tipsEnabled,
-          results: s.results ? { rows: s.results.rows, gpFinal: s.results.gpFinal } : null,
-          karts: s.race ? [...s.race.playerOfKart] : [],
+          results: r ? { rows: r.rows, gpFinal: r.gpFinal } : null,
+          karts: s.match ? [...s.match.playerOfSlot] : [],
+          game: s.gameId,
+          games: s.gameInfos,
+          gameSetup,
+          sandbox: s.sandboxView,
+          resultsInfo: r ? r.info : null,
+          switching: s.switching,
+          tutorialsSeen: Array.from(s.tutorialsSeen),
         };
       },
       setTvMode: (on: boolean) => this.display.setTvMode(!!on),
@@ -193,16 +242,19 @@ export class PartyApp {
         const p = s.player(id);
         return p ? s.sync.buildState(p) : null;
       },
+      pickGame: async (id: GameId) => {
+        if (id === s.gameId) return true;
+        const where = s.screen;
+        if (where !== 'lobby' && where !== 'title' && where !== 'setup' && where !== 'results') return false;
+        return s.switchGame(id, where === 'setup' || where === 'results');
+      },
+      skipSandbox: () => s.hostSkipSandbox(),
     };
   }
 
   dispose(): void {
     for (const off of this.offs) off();
     this.offs.length = 0;
-    this.game.onPhaseChange = null;
-    this.game.onRaceComplete = null;
-    this.game.onPauseRequest = null;
-    this.game.onSoloExit = null;
     this.net.dispose();
     this.session.dispose();
     this.display.dispose();

@@ -224,6 +224,7 @@ export class Game implements IGameHost {
   private pendingDebug: 'finishAll' | null = null;
   private racesStartedCount = 0;
   private tvMode = false;
+  private suspended = false;
 
   private readonly channels: HumanInputChannel[] = [];
   private readonly slotAIRequest: boolean[] = [false, false, false, false];
@@ -366,6 +367,7 @@ export class Game implements IGameHost {
 
   showDemo(): void {
     if (this.disposed) return;
+    if (this.suspended) this.setSuspended(false);
     this.hideMenus();
     if (this.phaseValue === 'demo' && (this.session?.kind === 'demo' || this.pendingDemo)) return;
     this.disposeSession();
@@ -522,6 +524,41 @@ export class Game implements IGameHost {
     this.playMusic('menu');
   }
 
+  /**
+   * PARTY HUB: suspend the whole kart engine while another game is on screen — drops any
+   * race/demo, stops the render loop, music and engine sounds, hides the canvas + HUD.
+   * `setSuspended(false)` shows it again (phase 'idle'; the party layer then calls showDemo()).
+   */
+  setSuspended(on: boolean): void {
+    if (this.disposed || on === this.suspended) return;
+    this.suspended = on;
+    if (on) {
+      this.hideMenus();
+      this.disposeSession();
+      this.pendingCfg = null;
+      this.pendingDemo = false;
+      this.loading.hide();
+      this.setPhase('idle');
+      this.currentMusic = 'none';
+      this.safe(() => this.audio.stopMusic());
+      this.safe(() => {
+        this.audio.update(0.1, EMPTY_KARTS, -1, this.camera);
+        this.audio.update(0.1, EMPTY_KARTS, -1, this.camera);
+      });
+      cancelAnimationFrame(this.rafId);
+      this.rafId = 0;
+      this.renderer.domElement.style.display = 'none';
+      this.uiRoot.style.display = 'none';
+    } else {
+      this.renderer.domElement.style.display = '';
+      this.uiRoot.style.display = '';
+      this.lastTime = -1;
+      this.sizeDirty = true;
+      cancelAnimationFrame(this.rafId);
+      this.rafId = requestAnimationFrame(this.loop);
+    }
+  }
+
   setTvMode(on: boolean): void {
     this.tvMode = !!on;
     this.uiRoot.classList.toggle('tv', this.tvMode);
@@ -649,7 +686,7 @@ export class Game implements IGameHost {
   // ================================================================== main loop
 
   private readonly loop = (now: number): void => {
-    if (this.disposed) return;
+    if (this.disposed || this.suspended) return;
     this.rafId = requestAnimationFrame(this.loop);
     if (this.lastTime < 0) this.lastTime = now;
     let raw = (now - this.lastTime) / 1000;

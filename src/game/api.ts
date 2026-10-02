@@ -117,6 +117,11 @@ export interface IGameHost {
   openSoloMenu(): void;
   /** Toggle 10-foot UI sizing for the engine HUD (party layer owns the decision). */
   setTvMode(on: boolean): void;
+  /**
+   * PARTY HUB (optional): suspend the engine while another game is on screen — stop the render
+   * loop, music and engine sounds, hide canvas + HUD. `false` shows it again (then showDemo()).
+   */
+  setSuspended?(on: boolean): void;
 
   // Callbacks (assigned by the party layer).
   /** Phase changed. */

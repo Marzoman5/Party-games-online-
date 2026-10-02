@@ -2894,3 +2894,285 @@ kbd {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* =============================================================================
+   PARTY HUB — game logos, game picker cards, portraits, teams, game switching.
+   ============================================================================= */
+
+/* Sticker logo for a game (title + lobby cards) */
+.kp-glogo {
+  --gc: var(--kp-pink);
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 1);
+  font-family: var(--kp-display);
+  font-style: italic;
+  line-height: 0.9;
+  transform: rotate(-3deg);
+}
+
+.kp-glogo-emoji {
+  font-size: calc(var(--u) * 4.6);
+  font-style: normal;
+  filter: drop-shadow(0 calc(var(--u) * 0.4) 0 rgba(0, 0, 0, 0.45));
+}
+
+.kp-glogo-words {
+  display: flex;
+  flex-direction: column;
+}
+
+.kp-glogo-words span {
+  -webkit-text-stroke: calc(var(--u) * 0.3) var(--kp-deep);
+  paint-order: stroke fill;
+  letter-spacing: 0.03em;
+}
+
+.kp-glogo-a {
+  font-size: calc(var(--u) * 3.2);
+  color: #fff;
+}
+
+.kp-glogo-b {
+  font-size: calc(var(--u) * 3.6);
+  color: var(--gc);
+  text-shadow: 0 calc(var(--u) * 0.35) 0 var(--kp-deep);
+}
+
+.kp-title-games {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2.2);
+  margin: calc(var(--u) * -1) 0 calc(var(--u) * 0.4) calc(var(--u) * 1);
+}
+
+.kp-title-plus {
+  font-family: var(--kp-display);
+  font-size: calc(var(--u) * 3.4);
+  color: var(--kp-yellow);
+  -webkit-text-stroke: calc(var(--u) * 0.2) var(--kp-deep);
+  paint-order: stroke fill;
+}
+
+/* Lobby = hub: game picker */
+.kp-lobby-inner {
+  gap: calc(var(--u) * 2.2);
+}
+
+.kp-gpick-wrap {
+  position: relative;
+  flex: none;
+}
+
+.kp-gpick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--u) * 2.4);
+}
+
+.kp-gpick-hint {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--u) * -1.6);
+  transform: translateX(-50%);
+  z-index: 2;
+  white-space: nowrap;
+  font-weight: 900;
+  font-size: calc(var(--u) * 1.9);
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 1.6);
+  border-radius: 999px;
+  background: var(--kp-deep);
+  border: calc(var(--u) * 0.25) solid var(--kp-yellow);
+  color: var(--kp-yellow);
+  pointer-events: none;
+}
+
+.kp-gcard {
+  --gc: var(--kp-pink);
+  pointer-events: auto;
+  cursor: pointer;
+  position: relative;
+  display: grid;
+  grid-template-columns: calc(var(--u) * 17) 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: calc(var(--u) * 1.6);
+  text-align: left;
+  color: #fff;
+  font: inherit;
+  padding: calc(var(--u) * 1) calc(var(--u) * 2) calc(var(--u) * 1) calc(var(--u) * 1);
+  border-radius: calc(var(--u) * 2.4);
+  border: calc(var(--u) * 0.45) solid rgba(255, 255, 255, 0.25);
+  background:
+    radial-gradient(80% 120% at 15% 50%, color-mix(in srgb, var(--gc) 40%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(30, 18, 70, 0.9), rgba(14, 8, 36, 0.92));
+  opacity: 0.6;
+  filter: saturate(0.55);
+  transition:
+    transform 0.35s var(--kp-pop),
+    opacity 0.25s,
+    filter 0.25s,
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+
+.kp-gcard:hover {
+  opacity: 0.85;
+}
+
+.kp-gcard-art {
+  grid-row: 1 / span 2;
+  height: calc(var(--u) * 10);
+  display: grid;
+  place-items: center;
+}
+
+.kp-gart {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.kp-gcard .kp-glogo {
+  align-self: end;
+}
+
+.kp-gcard-tag {
+  align-self: start;
+  font-weight: 800;
+  font-size: calc(var(--u) * 1.9);
+  color: var(--kp-ink-dim);
+  margin-top: calc(var(--u) * 0.6);
+}
+
+.kp-gcard-pick {
+  position: absolute;
+  right: calc(var(--u) * 1.4);
+  top: calc(var(--u) * 1.2);
+  font-family: var(--kp-display);
+  letter-spacing: 0.1em;
+  font-size: calc(var(--u) * 2);
+  padding: calc(var(--u) * 0.3) calc(var(--u) * 1.2);
+  border-radius: 999px;
+  background: var(--kp-yellow);
+  color: var(--kp-deep);
+  transform: scale(0) rotate(8deg);
+  transition: transform 0.35s var(--kp-pop);
+}
+
+.kp-gcard.kp-selected {
+  opacity: 1;
+  filter: none;
+  border-color: var(--kp-yellow);
+  transform: scale(1.02) rotate(-0.6deg);
+  box-shadow:
+    0 calc(var(--u) * 0.7) 0 var(--kp-deep),
+    0 0 calc(var(--u) * 4) color-mix(in srgb, var(--gc) 70%, transparent);
+}
+
+.kp-gcard.kp-selected .kp-gcard-pick {
+  transform: scale(1) rotate(8deg);
+}
+
+.kp-gcard.kp-selected .kp-gart {
+  animation: kp-idle 1.6s ease-in-out infinite;
+}
+
+.kp-gcard.kp-loading {
+  opacity: 0.9;
+  animation: kp-pulse-text 0.9s ease-in-out infinite;
+}
+
+/* Portrait-or-avatar face */
+.kp-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.kp-portrait {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 calc(var(--u) * 0.8) 0 rgba(0, 0, 0, 0.35));
+}
+
+.kp-face.kp-has-portrait > .kp-portrait {
+  display: block;
+}
+
+.kp-face.kp-has-portrait > .kp-avatar {
+  display: none;
+}
+
+.kp-card .kp-portrait {
+  animation: kp-idle 1.8s ease-in-out infinite;
+}
+
+.kp-card-stage > .kp-face {
+  position: absolute;
+  inset: 0;
+}
+
+.kp-ack .kp-face {
+  width: 100%;
+  height: 100%;
+}
+
+/* Smash: keep the join chip clear of the fighters' damage panels */
+html[data-game='smash'] .kp-race-chip {
+  bottom: auto;
+  top: calc(var(--safe) + var(--u) * 1);
+}
+
+.kp-card-racer {
+  white-space: pre-line;
+  text-align: center;
+}
+
+.kp-card-team {
+  --team: #ff4d4d;
+  display: none;
+  font-family: var(--kp-display);
+  letter-spacing: 0.12em;
+  font-size: calc(var(--u) * 1.8);
+  padding: calc(var(--u) * 0.2) calc(var(--u) * 1.2);
+  border-radius: 999px;
+  background: var(--team);
+  color: #fff;
+  -webkit-text-stroke: calc(var(--u) * 0.1) var(--kp-deep);
+}
+
+.kp-card-team.kp-on {
+  display: block;
+}
+
+/* Game loading banner (lazy engine) */
+.kp-banner-game {
+  background: linear-gradient(100deg, var(--kp-pink), #7a3dff);
+}
+
+.kp-banner-game.kp-on {
+  transition-delay: 0s;
+}
+
+/* Pause: which game */
+.kp-pause-game {
+  font-family: var(--kp-display);
+  letter-spacing: 0.16em;
+  font-size: calc(var(--u) * 2.2);
+  color: var(--kp-yellow);
+}
+
+/* Switch game button */
+.kp-btn.kp-switch {
+  background: linear-gradient(100deg, rgba(255, 122, 47, 0.35), rgba(122, 61, 255, 0.35));
+  border-color: rgba(255, 210, 63, 0.7);
+}

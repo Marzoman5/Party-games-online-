@@ -1,8 +1,9 @@
 /**
- * PhoneSync — builds each phone's personalised PhoneState and only sends it when it
- * actually changed (JSON diff per player), plus the ~10 Hz PhoneRaceStatus during races.
+ * PhoneSync — builds each phone's personalised PhoneState and only sends it when it actually
+ * changed (JSON diff per player), plus the active game's ~10 Hz status (`t:'race'` / `t:'fight'`)
+ * during matches and the sandbox.
  */
-import type { LobbyPlayer, PhoneRaceStatus, PhoneState } from '../net/protocol';
+import type { LobbyPlayer, PhoneState } from '../net/protocol';
 import type { NetPort } from './net/HostNet';
 import type { PartySession, PlayerRec } from './PartySession';
 import { RACE_STATUS_MS } from './config';
@@ -17,15 +18,16 @@ function lobbyView(p: PlayerRec): LobbyPlayer {
     connected: p.connected,
     isLeader: p.isLeader,
     tutorialDone: p.tutorialDone,
+    team: p.team,
   };
 }
 
 export class PhoneSync {
   private readonly lastState = new Map<string, string>();
-  private readonly lastRace = new Map<string, string>();
+  private readonly lastStatus = new Map<string, string>();
   private readonly forced = new Set<string>();
   private forceEveryone = false;
-  private raceTimer = 0;
+  private statusTimer = 0;
 
   constructor(
     private readonly s: PartySession,
@@ -35,19 +37,19 @@ export class PhoneSync {
   /** Resend this player's state on the next sync even if unchanged (reconnect / rejected pick). */
   force(playerId: string): void {
     this.forced.add(playerId);
-    this.lastRace.delete(playerId);
+    this.lastStatus.delete(playerId);
     this.s.changed();
   }
 
   forceAll(): void {
     this.forceEveryone = true;
-    this.lastRace.clear();
+    this.lastStatus.clear();
     this.s.changed();
   }
 
   forget(playerId: string): void {
     this.lastState.delete(playerId);
-    this.lastRace.delete(playerId);
+    this.lastStatus.delete(playerId);
     this.forced.delete(playerId);
   }
 
@@ -55,6 +57,13 @@ export class PhoneSync {
     const s = this.s;
     const players = s.players.map(lobbyView);
     const t = s.tutorial;
+    const r = s.results;
+    let gameSetup: Record<string, unknown> = {};
+    try {
+      gameSetup = s.game.getSetup();
+    } catch {
+      /* ignore */
+    }
     return {
       t: 'state',
       screen: s.screenFor(p),
@@ -66,8 +75,13 @@ export class PhoneSync {
       gp: s.gpView,
       tutorial: t ? { step: Math.min(t.step, t.total - 1), total: t.total } : null,
       pause: s.pause ? { by: s.pause.by, votes: s.pause.voters.size, needed: s.resumeNeeded } : null,
-      results: s.results ? { rows: s.results.rows, gpFinal: s.results.gpFinal } : null,
+      results: r ? { rows: r.rows, gpFinal: r.gpFinal } : null,
       tipsEnabled: s.tipsEnabled,
+      game: s.gameId,
+      games: s.gameInfos,
+      gameSetup,
+      sandbox: s.sandboxView,
+      resultsInfo: r ? r.info : null,
     };
   }
 
@@ -87,68 +101,57 @@ export class PhoneSync {
     this.forceEveryone = false;
   }
 
+  /** Start the ~10 Hz per-phone status ticker (match / sandbox). */
+  startStatus(): void {
+    this.lastStatus.clear();
+    window.clearInterval(this.statusTimer);
+    this.statusTimer = window.setInterval(this.statusTick, RACE_STATUS_MS);
+  }
+
+  stopStatus(): void {
+    window.clearInterval(this.statusTimer);
+    this.statusTimer = 0;
+  }
+
+  /** @deprecated kart-era names. */
   startRaceStatus(): void {
-    this.lastRace.clear();
-    window.clearInterval(this.raceTimer);
-    this.raceTimer = window.setInterval(this.raceTick, RACE_STATUS_MS);
+    this.startStatus();
   }
-
   stopRaceStatus(): void {
-    window.clearInterval(this.raceTimer);
-    this.raceTimer = 0;
+    this.stopStatus();
   }
 
-  private readonly raceTick = (): void => {
+  private readonly statusTick = (): void => {
     const s = this.s;
-    const race = s.race;
-    if (!race) return;
-    // Belt and braces: engine may have skipped straight past 'loading' without a phase callback.
-    if (s.screen === 'loading') {
-      const ph = s.game.phase;
-      if (ph === 'intro' || ph === 'countdown' || ph === 'racing' || ph === 'finished') {
-        s.screen = 'race';
-        s.changed();
-      }
+    const m = s.match;
+    if (!m) return;
+    // Belt and braces: the engine may have skipped straight past 'loading' without a phase callback.
+    if (s.screen === 'loading' && m.kind === 'match' && s.game.isLive()) {
+      s.screen = 'race';
+      s.changed();
     }
     if (!this.net.isOpen) return;
-    const phase = s.game.phase;
-    for (const [id, k] of race.kartOf) {
+    for (const [id, seat] of m.slotOf) {
       const p = s.player(id);
       if (!p || !p.connected) continue;
-      let st;
+      let msg;
       try {
-        st = s.game.getSlotStatus(k);
+        msg = s.game.status(seat);
       } catch {
-        st = null;
+        msg = null;
       }
-      if (!st) continue;
-      let countdown = st.countdown;
-      if (phase === 'loading' || phase === 'intro') countdown = 3;
-      else if (phase !== 'countdown') countdown = 0;
-      const msg: PhoneRaceStatus = {
-        t: 'race',
-        place: st.place,
-        lap: st.lap,
-        laps: st.laps,
-        item: st.item,
-        itemCount: st.itemCount,
-        roulette: st.roulette,
-        driftStage: st.driftStage,
-        countdown,
-        finished: st.finished,
-        ai: st.aiControlled,
-      };
+      if (!msg) continue;
       const json = JSON.stringify(msg);
-      if (this.lastRace.get(id) !== json) {
-        this.lastRace.set(id, json);
+      if (this.lastStatus.get(id) !== json) {
+        this.lastStatus.set(id, json);
         this.net.sendTo(id, msg);
       }
     }
   };
 
   dispose(): void {
-    this.stopRaceStatus();
+    this.stopStatus();
     this.lastState.clear();
-    this.lastRace.clear();
+    this.lastStatus.clear();
   }
 }

@@ -2,15 +2,15 @@
  * SETUP — mirrors the leader's live choices big: mode, track card (name, theme colours,
  * difficulty stars, minimap from controlPoints), cc and laps. GP mode shows the 4-race cup.
  */
-import { TRACKS, getTrackDef } from '../../track/tracks/index';
-import { SLOT_COLORS } from '../../net/protocol';
-import type { PartySession } from '../PartySession';
-import type { ScreenView, UiContext } from './HostUI';
-import { AvatarView } from './avatar';
-import { button, h, replay, setText, toggle } from './dom';
+import { TRACKS, getTrackDef } from '../../../track/tracks/index';
+import { SLOT_COLORS } from '../../../net/protocol';
+import type { PartySession } from '../../../engine/PartySession';
+import type { ScreenView, UiContext } from '../../../party/ui/HostUI';
+import { AvatarView } from '../../../party/ui/avatar';
+import { button, h, replay, setText, toggle } from '../../../party/ui/dom';
 import { minimapMarkup, stars, themeColors, themeEmoji } from './trackArt';
 
-export class SetupScreen implements ScreenView {
+export class KartSetupScreen implements ScreenView {
   readonly root: HTMLDivElement;
   private readonly who = h('div', 'kp-setup-who');
   private readonly trackCard: HTMLDivElement;
