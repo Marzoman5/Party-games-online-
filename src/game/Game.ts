@@ -1134,6 +1134,9 @@ export class Game implements IGameHost {
       this.appliedShadowSize = -1;
       return;
     }
+    // Decoration density follows the quality tier (cheap to re-apply).
+    const tier = this.quality.tier;
+    this.safe(() => s.track.setDetail?.(tier));
     if (size === this.appliedShadowSize) return;
     this.appliedShadowSize = size;
     const sun = s.sun;
