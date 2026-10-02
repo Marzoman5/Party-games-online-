@@ -233,11 +233,81 @@ Debug hooks: `window.__game` (engine), `window.__party` (host session), `window.
 
 ## Design decisions
 
-DECISIONS_PLACEHOLDER
+Judgment calls made while building (the brief said "decide, document, keep going"):
+
+**Flow**
+- The how-to-play tutorial plays automatically the **first time the leader presses START** in a
+  session (between lobby and setup), rather than the instant the first phone joins — people are
+  still picking racers at that point. It can be replayed from the lobby (leader phone or host
+  button) and skipped by the leader, host **Esc**, or the Skip button.
+- Tutorial timing: 6 steps × 3.8 s (~23 s), then a "Got it!" phase that ends 1.2 s after everyone
+  has tapped Got it, or after 10 s.
+- The leader's START needs every *connected* player to be ready; disconnected players never block it.
+- Late joiners during a race are auto-marked ready and race next time.
+- A **Grand Prix** always runs the 4 tracks in order (Sunny Circuit → Dune Drift → Frostbite Falls →
+  Neon Nexus) with the chosen cc and laps; the track picker only matters for Single Race.
+  Points 15/12/10/8/6/4/2/1 for all 8 karts (AI included). Replaying a GP race replaces its points.
+- Single Race "Next Race" goes to the next track (wrapping) with the same settings.
+- Pause: the leader resumes instantly; other players' resume votes count, and a majority of
+  connected racers resumes the race.
+- Contextual tips are on for the first race of the session only (leader can toggle tips off).
+- If the host page loses the server mid-race, the race auto-pauses (karts would otherwise keep
+  driving on stale input).
+
+**Controls & feel**
+- Auto-accelerate is on by default. During the countdown the phone holds the gas off and applies
+  it ~0.35 s before GO — which is inside the rocket-start window, so casual players get a fair
+  rocket start. Holding gas from the very start of the countdown is neutral; pressing it too early
+  causes a burnout.
+- Touch steering is relative to the touch-down point: ±22% of the screen width is full lock, 6%
+  deadzone, gentle curve, ~40 ms smoothing.
+- Item taps are counted (`itemPresses`), so quick taps are never lost; each tap waits up to 0.6 s
+  for the item to become usable.
+- Throw backwards = hold BRAKE and tap ITEM (no separate look-back button on phones).
+- When a phone disconnects mid-race the AI drives that kart (labelled "AI DRIVING") until the
+  same phone (same browser token) comes back; after finishing, the AI also drives your kart to
+  the end of the race.
+- 50/100/150cc set kart speed to 80/92/100% and AI difficulty to easy/normal/hard.
+
+**Display**
+- TV mode default: window ≥ 1920 px wide. 2-player split is side-by-side when the screen aspect
+  is ≥ 1.5 (TV / widescreen laptop), stacked otherwise.
+- Post-processing (bloom, speed lines) is used in 1-player view only; split-screen renders plain
+  for performance. Quality tiers: 0 (0.6 MP, no shadows) … 3 (up to 8.3 MP, DPR 2, 2048 shadows);
+  starting tier depends on view count and screen size, and adapts (drop after 2 s < 50 fps, raise
+  after 8 s > 58 fps).
+
+**Originality**
+- Base-game item ids are kept internally, but every player-facing name and model is original:
+  BANANA, BOUNCER, SEEKER, LEADER ZAP, TURBO, GOLD TURBO, SUPERNOVA, THUNDER, BOOMER.
+- Racers (Zippy Nova, Pixel Pop, Fennec Flash, Max Vortex, Juno Bolt, Kai Tidewater, Boulder Bram,
+  Big Rig Rosa) and tracks are the base game's originals.
 
 ## Known limitations
 
-LIMITATIONS_PLACEHOLDER
+- **Real devices untested in this build environment.** Everything was tested in headless Chromium
+  (desktop + iPhone/Android emulation). iOS Safari specifics (scroll/zoom blocking, motion
+  permission, add-to-home-screen) were implemented carefully but not verified on a physical phone.
+  Do a 2-minute rehearsal before guests arrive.
+- **Performance on real hardware is unmeasured.** The test machine renders with a software GPU
+  (1–10 fps). The automatic quality scaler should hold frame rate with 4 views on a 4K TV, but if
+  it looks choppy add `?quality=1` (or `0`) to the host URL.
+- **iPhone fullscreen**: iOS Safari doesn't allow web pages to go fullscreen on iPhone; the browser
+  bars stay visible (use "Add to Home Screen" for a fullscreen controller). Vibration is not
+  supported on iOS (silently ignored).
+- **Wake lock** needs HTTPS on some browsers; on plain HTTP the phone may dim after a while
+  (players touch it constantly while racing, so it rarely matters).
+- **Tilt steering requires HTTPS** (`npm run start:https`) and clicking through a certificate
+  warning on each phone.
+- Networking is local only (same Wi-Fi). Networks with client isolation (many guest/hotel Wi-Fi)
+  block phones from reaching the laptop — use a phone/laptop hotspot instead.
+- Only one host screen per room; opening the game in a second tab takes over the room (the first
+  tab shows "open in another tab").
+- Split-screen renders a shadow pass per view; on weak GPUs the scaler turns shadows off.
+- Tutorial sound effects on the host only play after someone has clicked/pressed a key on the
+  host page once (browser autoplay rules).
+- Fonts are system fonts (Impact etc.) — no web fonts, so the look varies slightly per OS.
+- No online play and no battle mode (out of scope).
 
 ## Credits & licenses
 
