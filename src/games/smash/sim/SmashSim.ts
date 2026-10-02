@@ -652,6 +652,8 @@ export class SmashSim implements ISmashSim {
         if (f.grabbedBy >= 0 && (inp.attackPressed || inp.specialPressed || inp.jumpPressed || inp.shieldPressed || inp.grabPressed)) {
           this.fighters[f.grabbedBy].grabTimer += 4;
         }
+        // mash presses must not replay as a move after release
+        f.bAtk = f.bSpc = f.bJmp = f.bShd = f.bGrb = 0;
         physics = false;
         break;
       case 'thrown':
@@ -1578,7 +1580,7 @@ export class SmashSim implements ISmashSim {
   private koFighter(f: Fighter, side: 'left' | 'right' | 'top' | 'bottom'): void {
     const b = this.stage.blast;
     const credit =
-      f.lastAttacker >= 0 && f.lastAttacker !== f.index && this.frame - f.lastHitFrame <= CREDIT_WINDOW && this.canHurt(f.lastAttacker, f.index)
+      f.lastAttacker >= 0 && f.lastAttacker !== f.index && (this.frame - f.lastHitFrame <= CREDIT_WINDOW || f.action === 'tumble' || f.action === 'hitstun' || f.action === 'thrown') && this.canHurt(f.lastAttacker, f.index)
         ? f.lastAttacker
         : -1;
     this.ev.push({ type: 'ko', victim: f.index, by: credit, x: clamp(f.x, b.left, b.right), y: clamp(f.y, b.bottom, b.top), side });
