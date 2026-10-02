@@ -637,6 +637,7 @@ export class PartySession {
       } catch (err) {
         console.error(`[party] could not load ${id}`, err);
         this.switching = null;
+        this.startQueued = false;
         this.toast(`${mod.info.title} couldn’t start on this computer — staying on ${this.game.info.title}`, 'error');
         this.changed();
         return false;
@@ -644,6 +645,14 @@ export class PartySession {
       this.switching = null;
       if (this.disposed) return false;
     }
+    const queued = this.startQueued;
+    this.startQueued = false;
+    if (queued) queueMicrotask(() => {
+      if (!this.disposed && !this.switching) {
+        this.leaderStart();
+        this.changed();
+      }
+    });
     // Things may have moved on while loading.
     const where = this.screen;
     if (where !== 'lobby' && where !== 'title' && where !== 'setup' && where !== 'results') {
@@ -692,8 +701,15 @@ export class PartySession {
 
   // =================================================================== transitions
 
+  /** Leader pressed START while a game engine was still loading: replay it once loading ends. */
+  private startQueued = false;
+
   private leaderStart(): void {
-    if (this.soloActive || this.switching) return;
+    if (this.soloActive) return;
+    if (this.switching) {
+      this.startQueued = true;
+      return;
+    }
     if (this.screen === 'lobby') {
       if (!this.allConnectedReady()) {
         this.sync.forceAll();

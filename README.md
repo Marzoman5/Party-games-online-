@@ -1,34 +1,175 @@
-# 🏁 Kart Party
+# 🎉 Party Hub — Kart Party + Smash Party
 
 > **Party quick start**
-> 1. Install [Node.js 18+](https://nodejs.org), then in this folder run: `npm install && npm start`
+> 1. Install [Node.js 18+](https://nodejs.org), then: `git checkout party-hub && npm install && npm start`
 > 2. The game opens in your browser — plug the laptop into the TV and press **F** (fullscreen).
-> 3. Make sure everyone's phone is on the **same Wi-Fi** as the laptop.
-> 4. Players scan the **QR code** (or type the address + 4-letter code shown on screen).
-> 5. Pick a racer, tap **READY**, and the first player (the 👑 leader) starts the race from their phone.
+> 3. Everyone's phone on the **same Wi-Fi** as the laptop → scan the **QR code** on the TV.
+> 4. Pick a name + character, tap **READY**. The first player (👑 leader) picks **Kart Party** or **Smash Party** on their phone.
+> 5. Leader taps **START**. After each match the leader picks **Rematch / Change Settings / Switch Game / Lobby**.
 
-Kart Party is a couch-multiplayer arcade kart racer: the game runs on a laptop or TV, and
-**1–4 players use their phones as controllers** — no app install, just a web page. 8 karts per
-race (humans + AI), 4 tracks, 13 items, drifting with mini-turbos, rocket starts, ramp tricks,
-split-screen, Grand Prix mode. All characters, tracks and item names are original.
+Party Hub is a couch-multiplayer party app: the game runs on a laptop or TV, and **1–4 players use their
+phones as controllers** (a web page, nothing to install). Players join **once** and stay connected while
+the party switches between games:
 
-It works completely **offline on a local network**: no CDNs, no web fonts, no internet needed —
-everything (3D models, textures, sounds, music, QR codes) is generated locally.
+- **🏁 Kart Party** — arcade kart racer: 8 karts, 4 tracks, 13 items, drifting, Grand Prix, split-screen.
+- **🥊 Smash Party** — an original 2.5D platform fighter: damage %, knockback, blast-zone KOs, 8 fighters,
+  3 stages (+ training), items, CPU fighters (levels 1–9), stock/time modes, 2v2 teams.
+
+Everything is original and generated in code — no asset files, no web fonts, no internet needed at the
+party. No Nintendo names, characters, sprites, sounds or stage likenesses are used.
 
 ---
 
 ## Contents
-- [Setup](#setup)
-- [Firewall tips](#firewall-tips-phones-cant-connect)
-- [TV mode](#tv-mode)
-- [HTTPS / tilt steering](#https-mode-tilt-steering-on-iphone)
-- [Controls](#controls)
-- [Game flow](#game-flow)
-- [Architecture & protocol](#architecture)
-- [Testing](#testing)
-- [Design decisions](#design-decisions)
-- [Known limitations](#known-limitations)
-- [Credits & licenses](#credits--licenses)
+- [Party Hub flow](#party-hub-flow)
+- [Smash Party: controls](#smash-party-controls)
+- [Smash Party: mechanics](#smash-party-mechanics)
+- [Smash Party: fighters & movesets](#smash-party-fighters--movesets)
+- [Smash Party: stages & items](#smash-party-stages--items)
+- [How the party engine works (adding a game)](#how-the-party-engine-works)
+- [Setup](#setup) · [Firewall tips](#firewall-tips-phones-cant-connect) · [TV mode](#tv-mode) · [HTTPS / tilt](#https-mode-tilt-steering-on-iphone)
+- [Kart Party controls](#controls) · [Kart game flow](#game-flow)
+- [Architecture & protocol](#architecture) · [Testing](#testing)
+- [Design decisions](#design-decisions) · [Known limitations](#known-limitations) · [Credits](#credits--licenses)
+
+## Party Hub flow
+
+1. **Title** — big QR code + room code; the active game's attract demo plays behind it.
+2. **Lobby (the hub)** — players join, pick a name and one of the 8 characters (the same roster is used
+   by both games; each character can be taken once) and tap READY. The **leader picks the game** on their
+   phone (the TV shows two big game cards; the host mouse can click them too).
+3. **How to play** — plays automatically the first time **each** game is started in a session: an animated
+   phone illustration on the TV with callouts, every phone shows the same step, players tap **Got it!**
+   (leader can skip; replay any time with *How to Play*).
+4. **Smash only: "try it" practice** — on the training stage everyone controls their fighter and can punch
+   a training dummy whose % keeps rising. Each player taps **I'm ready** (their fighter leaves); the leader
+   taps **START** (or it ends when everyone is ready).
+5. **Setup** — the leader configures the match on their phone (Kart: mode/track/cc/laps; Smash:
+   stage, stock/time, stocks/time, teams + friendly fire, CPU fill + level, items + frequency, hazards).
+   In team mode every player picks their team on their own phone.
+6. **Match** → **Results** → leader: **Rematch**, **Change Settings**, **Switch Game**, **Lobby**
+   (Kart also has **Next Race**). Switch Game keeps every player, slot and the leader; phones swap their
+   controller layout instantly, no reload or rejoin.
+
+Pause from any phone (⏸): the leader resumes/restarts/quits, others vote to resume. A phone that
+disconnects mid-match is handed to the AI/CPU; reopening the page on the same phone reclaims it.
+
+## Smash Party controls
+
+### Phone (hold sideways)
+
+| Control | Action |
+|---|---|
+| **Left side: floating stick** | Put your thumb anywhere on the left half — the stick appears there. Walk (light push), run (full push), crouch (down), drop through platforms (down on a thin platform), fast-fall (down in the air). The stick direction also picks the attack. |
+| **A — ATTACK** | Neutral: jab (tap again for a 3-hit combo). With a direction: forward/up/down **tilt**. Running: dash attack. In the air: neutral/forward/back/up/down **aerial**. **Flick the stick + ATTACK = SMASH attack** — hold A to charge it (up to 1 s, +40 % damage). Near an item: pick it up; holding one: use/throw it. |
+| **B — SPECIAL** | 4 specials per fighter: neutral / side / **up (recovery — use it when you fall off!)** / down. With the Party Orb power: your **final blast**. |
+| **JUMP** | Jump (tap = short hop, hold = full jump), tap again in the air for the double jump. |
+| **SHIELD** (hold) | Block. Shield + left/right = roll, shield + down = spot dodge, shield + ATTACK = grab. In the air: air dodge (in the stick direction). The shield shrinks while held — if it breaks you're dizzy! |
+| **GRAB** | Grab; then the stick throws (forward/back/up/down) and ATTACK pummels. Holding an item: throw it. |
+| **⏸ / ⚙️** | Pause · settings: **tap-jump** (flick up to jump — OFF by default), vibration, left-handed, stick size. |
+
+The phone shows your fighter, colour, damage % (white → yellow → red), stocks (or score + timer), and
+vibrates when you're hit (scaled by how hard), KO'd, or land a KO (Android; iOS has no vibration API).
+Inputs go out at 60 Hz plus instantly on every button press; presses are counted, and the host buffers
+each press for 5 frames, so mashing over Wi-Fi never loses an input.
+
+### Host keyboard (during Smash)
+**Esc/P** pause · **H** hitbox/hurtbox debug overlay · **M** mute · **F** fullscreen · **T** TV mode (title/lobby).
+
+## Smash Party mechanics
+
+- **Damage %, not health.** Every hit raises the target's %; the higher it is, the farther they fly.
+- **Knockback** uses a Smash-style formula (`src/games/smash/types.ts`):
+  `kb = ((((p/10 + p·d/20) · 200/(w+100) · 1.4) + 18) · kbg/100) + bkb` — target % after the hit `p`,
+  move damage `d`, fighter weight `w`, the move's knockback growth `kbg` and base knockback `bkb`.
+  Launch speed = kb × 0.003 units/frame, decaying 0.0051/frame; hitstun = 0.4 × kb frames; above 80 kb
+  the fighter tumbles (smoke trail) and gets knocked down on landing. Every move has its own launch angle.
+- **Hitlag** (freeze frames) on hits, longer on strong ones; hit sparks, screen shake, % number shake.
+- **KO** = leaving the blast zone (left/right/top/bottom): explosion beam, shake, crowd roar.
+  Respawn on a halo platform with ~2 s invincibility.
+- **Stock mode** (default 3 stocks) or **Time mode** (default 2 min; +1 per KO, −1 per fall/self-destruct).
+  Ties go to **sudden death** (300 %, one stock).
+- **Movement:** walk, run, jump + one double jump, short hop, fast-fall, platform drop-through,
+  **ledge grab** (brief invincibility; climb/jump/attack/roll/drop), air dodge, roll, spot dodge.
+- **Shield** shrinks with use and under hits; **shield break = dizzy**. **Grab + 4 throws**, pummel.
+- **Attacks:** jab combo, 3 tilts, 3 chargeable smashes, 5 aerials (with landing lag), 4 specials,
+  get-up and ledge attacks. All hitboxes/hurtboxes are data (startup, active, end lag frames) in
+  `src/games/smash/sim/moves.ts`; press **H** on the host to see them.
+- The simulation is a deterministic fixed 60 Hz step (`src/games/smash/sim/SmashSim.ts`), independent of
+  the render frame rate.
+
+## Smash Party fighters & movesets
+
+The 8 Kart Party racers, as full-body procedural low-poly fighters with keyframed animations
+(idle, run, jump, attacks, hurt, tumble, ledge hang, unique victory poses):
+
+| Fighter | Archetype | Weight | Neutral B | Side B | Up B (recovery) | Down B | Final blast | Tip |
+|---|---|---|---|---|---|---|---|---|
+| Max Vortex | All-rounder | 98 | Vortex Ball | Gust Cape | Vortex Uppercut | Cyclone Spin | Vortex Rush | Jab, tilt, then forward smash at high %! |
+| Boulder Bram | Heavy bruiser | 125 | Boulder Toss | Rockslide Shoulder (armour) | Mountain Leap | Quake Stomp | Landslide | One charged forward smash ends stocks. |
+| Zippy Nova | Speedy combo | 72 | Pinball Spin | Slipstream Dash | Corkscrew Climb | Tailwind Kick | Hyper Lap | Never stop moving: jab, dash in, juggle with up air! |
+| Kai Tidewater | Sword / reach | 96 | Tidal Edge (charge) | Wave Breaker (3 hits) | Riptide Rise | Undertow Counter | Riptide Cleave | Fight at the tip of your blade. |
+| Juno Bolt | Projectile zoner | 92 | Storm Bolt (charge) | Seeker Spark (homing) | Thunder Leap | Static Field | Storm Cannon | Charge Storm Bolt while they approach. |
+| Fennec Flash | Trickster | 82 | Mirage Decoy | Fox Fire (homing) | Blink Step (teleport) | Mirror Tail (reflector) | Mirage Ambush | Bait with decoys, reflect zoners. |
+| Pixel Pop* | Bubble-gum zoner | 78 | Gum Bomb | Sugar Rush | Bubble Lift | Pop Rocks | Sugar Storm | Lob gum bombs, float away. |
+| Big Rig Rosa* | Grappler | 118 | Horn Blast | Big Rig Rush (charge, armour) | Jackknife | Tow Hook (beats shields) | Eighteen Wheeler | Throw them off the edge! |
+
+\* rougher kits (less tuning than the six polished archetypes). Fighters also differ in run speed,
+jump height, air speed/control, gravity and fall speed.
+
+**CPU fighters** (levels 1–9) fill empty slots when the leader sets *CPU fill*: L1–2 are slow and
+beatable, L5–6 short-hop and combo, L7–9 edge-guard and shield/dodge reactively. Every level recovers to
+the stage, never walks off on purpose, uses items, and never targets teammates.
+
+## Smash Party stages & items
+
+| Stage | Layout | Music |
+|---|---|---|
+| **Skyline Summit** | Classic: main platform + 3 floating platforms, sunset above the clouds | its own song |
+| **Neon Arena** | Flat, no platforms, moonlit arena with a crowd | its own song |
+| **Magma Forge** | Two moving platforms + lava eruptions (warned ~2 s ahead). *Hazards off* = still platforms, no lava | its own song |
+| Training Room | Flat practice stage with the dummy (used by "try it") | its own song |
+
+Items (toggle + frequency low/medium/high in setup):
+**Bat** (home-run swing, breaks after 4 swings) · **Bomb** (throw it; explodes on contact or after its
+fuse) · **Power donut** (heals ~15 %) · **Surprise capsule** (throw/break it → random item, sometimes
+explodes) · **Party Orb** (rare, floats around; break it with 3 hits to power up — your next SPECIAL is a
+final blast that deals ~33–40 % and only launches hard at high %).
+
+## How the party engine works
+
+```
+src/engine/        game-agnostic party engine
+  PartySession.ts  screens state machine, players/slots/tokens/reconnect, leader + succession,
+                   ready/teams, tutorial runner, sandbox, pause + resume vote, game switching
+  PhoneSync.ts     personalised PhoneState per phone (diffed) + ~10 Hz per-phone match status
+  net/HostNet.ts   host WebSocket, reconnect, decodes BOTH input packet kinds (kart tag 0, fighter tag 1)
+  GameModule.ts    THE game-module interface (TSDoc)
+  display.ts       TV mode (--ui-scale, --safe, html.tv), fullscreen, cursor hiding
+src/party/         host UI shell: title (QR), lobby/hub with game cards, tutorial, race/pause overlays
+src/games/registry.ts   the list of games
+src/games/kart/         KartModule (wraps the kart engine, setup, Grand Prix, results, tutorial art)
+src/games/smash/module/ SmashModule (setup sanitising, tutorial, sandbox, results, host setup/results UI)
+src/games/smash/        Smash engine: sim/ (60 Hz simulation + CPU AI), model/ (fighters), view/ + SmashGame.ts
+src/phone/         phone controller framework + layouts (kart controller, fighter controller)
+server/            Node relay: rooms, QR, tokens/reconnect (game-agnostic)
+scripts/bots.ts    bot phones (kart driving + Smash bot brain) for tests and soak runs
+```
+
+A game is a `GameModule` (`src/engine/GameModule.ts`) that declares:
+- **metadata** (`info`: id, title, tagline, emoji, colour, min/max players) and its phone **controller layout** id;
+- **tutorial** steps (+ the phone illustration and callout anchors) and an optional **sandbox**;
+- **setup** (`getSetup` / `applySetup` with sanitising / snapshot) and its host setup + results **views**;
+- **lifecycle hooks**: `load` (lazy engine import), `activate` / `deactivate` / `showAttract`,
+  `startFromSetup`, `post` (rematch/next), `restart`, `quit`, `pause`, `resume`;
+- **players**: `input(seat, …)`, `setSeatAI(seat, on)` for disconnect handover, `status(seat)` (the ~10 Hz
+  message each phone gets), `tryIt` reactions, `look(characterId)` for portraits;
+- **results** come back through the session (rows + winner info) and drive the post-match menu.
+
+**Adding a third game:** write a module + engine, add it to `src/games/registry.ts`, add its id to
+`GameId`/`GAME_IDS` in `src/net/protocol.ts`, and add a phone layout (`src/phone/framework/layout.ts`:
+implement `ControllerLayout`, register it in `LAYOUT_FACTORIES` / `LAYOUT_FOR_GAME`). The server, lobby,
+QR/join, reconnect, pause/vote, TV mode and tutorial runner need no changes.
 
 ## Setup
 

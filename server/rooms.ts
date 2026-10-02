@@ -384,7 +384,8 @@ export class Hub {
       }
       seat = {
         playerId: `p${room.nextPlayerNum++}`,
-        token: crypto.randomUUID(),
+        // Adopt the phone's self-generated token (so a retry after a lost 'joined' reclaims this seat).
+        token: /^[A-Za-z0-9-]{16,64}$/.test(token) ? token : crypto.randomUUID(),
         client: c,
         joinedAt: now,
         disconnectedAt: 0,

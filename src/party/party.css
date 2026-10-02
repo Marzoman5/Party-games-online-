@@ -3130,6 +3130,10 @@ kbd {
 html[data-game='smash'] .kp-race-chip {
   bottom: auto;
   top: calc(var(--safe) + var(--u) * 1);
+  left: calc(var(--safe) + var(--u) * 1);
+  transform: none;
+  font-size: calc(var(--u) * 1.2);
+  opacity: 0.8;
 }
 
 .kp-card-racer {

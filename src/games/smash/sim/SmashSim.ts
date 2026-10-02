@@ -1601,11 +1601,11 @@ export class SmashSim implements ISmashSim {
     f.grounded = false;
     f.plat = -1;
     if (!this.sandbox && this.status === 'fighting') {
-      if (credit >= 0) {
-        this.fighters[credit].kos++;
-        f.falls++;
-      } else f.sds++;
-      for (const o of this.fighters) o.score = o.kos - o.falls - o.sds;
+      // Falls count every stock lost (SDs included); an SD gives nobody a point (+1/-1 time scoring).
+      f.falls++;
+      if (credit >= 0) this.fighters[credit].kos++;
+      else f.sds++;
+      for (const o of this.fighters) o.score = o.kos - o.falls;
       if (this.config.rules.mode === 'stock' || this.suddenDeath) f.stocks = Math.max(0, f.stocks - 1);
     }
     f.lastAttacker = -1;

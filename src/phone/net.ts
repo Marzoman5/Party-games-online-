@@ -23,6 +23,17 @@ export function tokenKey(room: string): string {
   return `kp.token.${room}`;
 }
 
+function newToken(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch {
+    /* insecure context on some browsers */
+  }
+  let t = '';
+  for (let i = 0; i < 32; i++) t += Math.floor(Math.random() * 16).toString(16);
+  return t;
+}
+
 export function normalizeRoom(code: string): string {
   return code
     .toUpperCase()
@@ -149,7 +160,13 @@ export class Net {
     ws.onopen = () => {
       if (this.ws !== ws) return;
       const room = state.room;
-      const token = lsGet(tokenKey(room)) ?? undefined;
+      // Create our identity BEFORE the first join: if this socket dies before 'joined' arrives, the retry
+      // reclaims the same seat instead of leaving an orphan "Player N (disconnected)" card on the TV.
+      let token = lsGet(tokenKey(room)) ?? undefined;
+      if (!token) {
+        token = newToken();
+        lsSet(tokenKey(room), token);
+      }
       ws.send(JSON.stringify({ t: 'join', room, token, v: PROTOCOL_VERSION }));
       this.lastRx = performance.now();
       clearInterval(this.pingTimer);
