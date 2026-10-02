@@ -4,7 +4,7 @@
  * private constants in their own folders.
  */
 
-export const GAME_TITLE = 'TURBO KART RUSH';
+export const GAME_TITLE = 'KART PARTY';
 
 /** Total karts on the grid (player + AI). */
 export const KART_COUNT = 8;
@@ -56,3 +56,14 @@ export const MINIMAP_SIZE = 220;
 export const LAYER_DEFAULT = 0;
 export const LAYER_BLOOM = 1;
 export const LAYER_UI3D = 2;
+
+// --- Kart Party additions (ENGINE-B) -----------------------------------------------------
+/** Jump ramp kicker length along the road (metres). */
+export const JUMP_RAMP_LENGTH = 7;
+/** Jump ramp lip height above the road (metres). */
+export const JUMP_RAMP_HEIGHT = 1.1;
+/** Minimum forward speed (m/s) to be launched by a jump ramp. */
+export const JUMP_RAMP_MIN_SPEED = 7;
+/** Trick boost on landing: strength / duration (applyBoost(..., 'trick')). */
+export const TRICK_BOOST_STRENGTH = 0.4;
+export const TRICK_BOOST_DURATION = 0.9;

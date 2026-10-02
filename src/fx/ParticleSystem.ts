@@ -322,6 +322,8 @@ class ParticleGroup {
   readonly material: THREE.ShaderMaterial;
   private readonly geometry: THREE.BufferGeometry;
   private readonly capacity: number;
+  /** Active ring size (≤ capacity), lowered by the quality tier. */
+  private limit: number;
   private head = 0;
   private runStart = 0;
   private runLength = 0;
@@ -338,9 +340,11 @@ class ParticleGroup {
   private readonly attributes: THREE.BufferAttribute[];
   private readonly supportsRanges: boolean;
   private readonly drawSize = new THREE.Vector2();
+  private readonly viewport = new THREE.Vector4();
 
   constructor(capacity: number, additive: boolean, atlas: THREE.Texture, renderOrder: number) {
     this.capacity = capacity;
+    this.limit = capacity;
     this.position = new Float32Array(capacity * 3);
     this.velocity = new Float32Array(capacity * 3);
     this.time = new Float32Array(capacity * 2);
@@ -403,15 +407,36 @@ class ParticleGroup {
     points.matrixAutoUpdate = false;
     points.name = additive ? 'ParticlesAdditive' : 'ParticlesAlpha';
     points.onBeforeRender = (renderer: THREE.WebGLRenderer): void => {
-      renderer.getDrawingBufferSize(this.drawSize);
-      this.material.uniforms.uHeightPx.value = this.drawSize.y;
-      this.material.uniforms.uAspect.value = this.drawSize.x / Math.max(1, this.drawSize.y);
+      // Use the current viewport (physical px), not the whole drawing buffer, so particle
+      // sizes stay correct in split-screen viewports and render targets.
+      renderer.getCurrentViewport(this.viewport);
+      const w = this.viewport.z;
+      const h = this.viewport.w;
+      if (w > 0 && h > 0) {
+        this.material.uniforms.uHeightPx.value = h;
+        this.material.uniforms.uAspect.value = w / h;
+      } else {
+        renderer.getDrawingBufferSize(this.drawSize);
+        this.material.uniforms.uHeightPx.value = this.drawSize.y;
+        this.material.uniforms.uAspect.value = this.drawSize.x / Math.max(1, this.drawSize.y);
+      }
     };
     this.points = points;
   }
 
   setTime(t: number): void {
     this.material.uniforms.uTime.value = t;
+  }
+
+  /** Shrink / grow the active pool (particle budget). Also limits the vertices drawn. */
+  setLimit(n: number): void {
+    const lim = Math.max(64, Math.min(this.capacity, Math.floor(n)));
+    if (lim === this.limit) return;
+    this.limit = lim;
+    if (this.head >= lim) this.head = 0;
+    this.runStart = 0;
+    this.runLength = 0;
+    this.geometry.setDrawRange(0, lim);
   }
 
   spawn(p: SpawnParams, now: number): void {
@@ -430,23 +455,25 @@ class ParticleGroup {
     this.misc[i4] = p.gravity; this.misc[i4 + 1] = p.atlas; this.misc[i4 + 2] = p.align; this.misc[i4 + 3] = p.drag;
 
     if (this.runLength === 0) this.runStart = i;
-    if (this.runLength < this.capacity) this.runLength++;
-    this.head = i + 1 >= this.capacity ? 0 : i + 1;
+    if (this.runLength < this.limit) this.runLength++;
+    this.head = i + 1 >= this.limit ? 0 : i + 1;
   }
 
   /** Push touched ranges to the GPU (called once per frame). */
   flush(): void {
     if (this.runLength === 0) return;
-    const full = !this.supportsRanges || this.runLength >= this.capacity;
-    for (const attr of this.attributes) {
+    const full = !this.supportsRanges || this.runLength >= this.limit;
+    const attrs = this.attributes;
+    for (let a = 0; a < attrs.length; a++) {
+      const attr = attrs[a];
       if (!full) {
         const n = attr.itemSize;
         const end = this.runStart + this.runLength;
-        if (end <= this.capacity) {
+        if (end <= this.limit) {
           attr.addUpdateRange(this.runStart * n, this.runLength * n);
         } else {
-          attr.addUpdateRange(this.runStart * n, (this.capacity - this.runStart) * n);
-          attr.addUpdateRange(0, (end - this.capacity) * n);
+          attr.addUpdateRange(this.runStart * n, (this.limit - this.runStart) * n);
+          attr.addUpdateRange(0, (end - this.limit) * n);
         }
       }
       attr.needsUpdate = true;
@@ -462,7 +489,7 @@ class ParticleGroup {
     }
     this.head = 0;
     this.runStart = 0;
-    this.runLength = this.capacity;
+    this.runLength = this.limit;
   }
 
   dispose(): void {
@@ -488,6 +515,8 @@ function boostSourceCode(source: BoostSource): number {
     case 'pad':
     case 'start':
       return BOOST_SOURCE_PAD;
+    case 'trick':
+      return BOOST_SOURCE_MUSHROOM;
     default:
       return BOOST_SOURCE_DRIFT;
   }
@@ -512,8 +541,13 @@ export class ParticleSystem implements IParticleSystem {
   private readonly accSmoke = new Float32Array(MAX_KARTS);
   private readonly accDust = new Float32Array(MAX_KARTS);
   private readonly accStar = new Float32Array(MAX_KARTS);
+  private readonly accBurnout = new Float32Array(MAX_KARTS);
   private accStreak = 0;
   private readonly boostSource = new Uint8Array(MAX_KARTS);
+  /** Quality knobs (setQuality): continuous emission multiplier and burst-count multiplier. */
+  private rateScale = 1;
+  private burstScale = 1;
+  private quality: 0 | 1 | 2 | 3 = 3;
 
   // Results-screen confetti shower (player podium). 0 = idle.
   private confettiTimer = 0;
@@ -574,7 +608,8 @@ export class ParticleSystem implements IParticleSystem {
     u.push(events.on('item:pickup', (e) => this.emit('itemBoxBurst', e.position)));
     u.push(events.on('race:finish', (e) => {
       if (!e.isPlayer) return;
-      this.playerPodiumPlace = e.place <= 3 ? e.place : 0;
+      // Several humans may finish: the podium shower follows the best human place.
+      if (e.place <= 3 && (this.playerPodiumPlace === 0 || e.place < this.playerPodiumPlace)) this.playerPodiumPlace = e.place;
       if (e.place > 3) return;
       const k = this.kartById(e.kartId);
       if (!k) return;
@@ -606,10 +641,32 @@ export class ParticleSystem implements IParticleSystem {
       this.boostSource[idx] = boostSourceCode(e.source);
       const k = this.kartById(e.kartId);
       if (!k) return;
-      const color = e.source === 'mushroom' || e.source === 'golden' ? 0xff9a2e : e.source === 'pad' ? 0x3ef2ff : 0x9fd8ff;
+      const color =
+        e.source === 'mushroom' || e.source === 'golden'
+          ? 0xff9a2e
+          : e.source === 'pad'
+            ? 0x3ef2ff
+            : e.source === 'trick'
+              ? 0xffd23f
+              : e.source === 'start'
+                ? 0xff5ce1
+                : 0x9fd8ff;
       this.tmp.copy(k.state.position);
       this.tmp.y += 0.4;
       this.emit('boostRing', this.tmp, { color, scale: 0.6 + clamp01(e.strength) * 0.8 });
+    }));
+    u.push(events.on('kart:trick', (e) => {
+      const k = this.kartById(e.kartId);
+      if (!k) return;
+      this.tmp.copy(k.state.position);
+      this.tmp.y += 0.6;
+      this.emit('boostRing', this.tmp, { color: 0xffd23f, scale: 0.9 });
+      this.emit('starSparkle', this.tmp, { scale: 1.2 });
+    }));
+    u.push(events.on('kart:ramp', (e) => {
+      const k = this.kartById(e.kartId);
+      if (!k) return;
+      this.emit('landPuff', k.state.position, { scale: 0.8 });
     }));
     u.push(events.on('kart:shrink', (e) => {
       const k = this.kartById(e.kartId);
@@ -665,12 +722,17 @@ export class ParticleSystem implements IParticleSystem {
     this.camUp.set(e[4], e[5], e[6]).normalize();
     this.camRight.set(e[0], e[1], e[2]).normalize();
 
+    // Camera-space speed streaks only make sense with a single human view (split-screen would
+    // show one player's streaks floating in the other viewports).
+    let humans = 0;
+    for (let i = 0; i < karts.length; i++) if (karts[i].state.isPlayer) humans++;
+    const streaks = humans === 1 && this.quality >= 2;
     for (let i = 0; i < karts.length; i++) {
       const st = karts[i].state;
       if (st.finished && !st.isBoosting && !st.isDrifting) continue;
       this.updateKartEmitters(dt, st, now);
       // Camera streaks only for a strong boost at genuinely high speed.
-      if (st.isPlayer && st.isBoosting && st.boostStrength >= 0.35 && Math.abs(st.speed) > BASE_TOP_SPEED * 1.12) {
+      if (streaks && st.isPlayer && st.isBoosting && st.boostStrength >= 0.35 && Math.abs(st.speed) > BASE_TOP_SPEED * 1.12) {
         this.updateSpeedStreaks(dt, now);
       } else if (st.isPlayer) {
         this.accStreak = 0;
@@ -818,6 +880,33 @@ export class ParticleSystem implements IParticleSystem {
       this.accDust[idx] = 0;
     }
 
+    // --- burnout wheelspin smoke (Kart Party) ------------------------------------------
+    if (st.isBurningOut) {
+      const n = this.take(this.accBurnout, idx, 40, dt);
+      for (let k = 0; k < n; k++) {
+        const side = k % 2 === 0 ? 1 : -1;
+        S.x = p.x - fx * 0.75 + rx * 0.55 * side + rnd(-0.1, 0.1);
+        S.y = p.y + 0.15;
+        S.z = p.z - fz * 0.75 + rz * 0.55 * side + rnd(-0.1, 0.1);
+        S.vx = -fx * rnd(1.5, 3.5) + rnd(-0.6, 0.6);
+        S.vy = rnd(0.4, 1.2);
+        S.vz = -fz * rnd(1.5, 3.5) + rnd(-0.6, 0.6);
+        S.life = rnd(0.7, 1.1);
+        S.size0 = 0.4; S.size1 = 1.5;
+        S.r0 = 0.8; S.g0 = 0.8; S.b0 = 0.82;
+        S.r1 = 0.6; S.g1 = 0.6; S.b1 = 0.62;
+        S.a0 = 0.5; S.a1 = 0;
+        S.rot = rnd(0, TAU); S.rotSpeed = rnd(-1.5, 1.5);
+        S.gravity = -0.03;
+        S.atlas = ATLAS_SMOKE;
+        S.align = 0;
+        S.drag = 1.8;
+        this.alpha.spawn(S, now);
+      }
+    } else {
+      this.accBurnout[idx] = 0;
+    }
+
     // --- star sparkle -----------------------------------------------------------
     if (st.isInvincible) {
       const n = this.take(this.accStar, idx, 70, dt);
@@ -849,7 +938,7 @@ export class ParticleSystem implements IParticleSystem {
   }
 
   private updateSpeedStreaks(dt: number, now: number): void {
-    this.accStreak += 38 * dt;
+    this.accStreak += 38 * this.rateScale * dt;
     let n = Math.floor(this.accStreak);
     this.accStreak -= n;
     if (n > MAX_PER_EMITTER_PER_FRAME) n = MAX_PER_EMITTER_PER_FRAME;
@@ -887,7 +976,7 @@ export class ParticleSystem implements IParticleSystem {
   private updateResultsConfetti(dt: number, now: number): void {
     this.confettiTimer -= dt;
     const s = this.confettiScale;
-    this.accConfetti += 55 * s * dt;
+    this.accConfetti += 55 * s * this.rateScale * dt;
     let n = Math.floor(this.accConfetti);
     this.accConfetti -= n;
     if (n > MAX_PER_EMITTER_PER_FRAME) n = MAX_PER_EMITTER_PER_FRAME;
@@ -916,7 +1005,7 @@ export class ParticleSystem implements IParticleSystem {
   }
 
   private take(acc: Float32Array, idx: number, rate: number, dt: number): number {
-    acc[idx] += rate * dt;
+    acc[idx] += rate * this.rateScale * dt;
     let n = Math.floor(acc[idx]);
     acc[idx] -= n;
     if (n > MAX_PER_EMITTER_PER_FRAME) n = MAX_PER_EMITTER_PER_FRAME;
@@ -977,7 +1066,7 @@ export class ParticleSystem implements IParticleSystem {
 
   private explosion(x: number, y: number, z: number, s: number, now: number): void {
     // fireball core (short)
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0, n = this.n(18); i < n; i++) {
       jitterPosition(x, y + 0.3 * s, z, 0.25 * s);
       randomSphereVelocity(rnd(1.5, 4.5) * s, 1.2 * s);
       S.life = rnd(0.3, 0.55);
@@ -989,7 +1078,7 @@ export class ParticleSystem implements IParticleSystem {
       this.additive.spawn(S, now);
     }
     // sparks
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0, n = this.n(40); i < n; i++) {
       jitterPosition(x, y + 0.3 * s, z, 0.15 * s);
       randomSphereVelocity(rnd(6, 15) * s, 2 * s);
       S.life = rnd(0.4, 0.9);
@@ -1001,7 +1090,7 @@ export class ParticleSystem implements IParticleSystem {
       this.additive.spawn(S, now);
     }
     // smoke: lingers ~1.2 s after the flash is gone
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0, n = this.n(24); i < n; i++) {
       jitterPosition(x, y + 0.4 * s, z, 0.4 * s);
       randomSphereVelocity(rnd(0.6, 2.2) * s, rnd(1.2, 3.0) * s);
       S.life = rnd(1.05, 1.4);
@@ -1020,7 +1109,7 @@ export class ParticleSystem implements IParticleSystem {
 
   private hitSparks(x: number, y: number, z: number, s: number, hex: number, dir: THREE.Vector3 | null, now: number): void {
     const c = rgb(hex);
-    const n = Math.round(22 * s);
+    const n = this.n(22 * s);
     for (let i = 0; i < n; i++) {
       jitterPosition(x, y, z, 0.1);
       randomSphereVelocity(rnd(3.5, 8) * s, 1.5);
@@ -1038,12 +1127,12 @@ export class ParticleSystem implements IParticleSystem {
 
   private itemBoxBurst(x: number, y: number, z: number, s: number, now: number): void {
     // Rainbow glass shards: big and bright for a beat, gone within ~0.6 s.
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0, n = this.n(36); i < n; i++) {
       jitterPosition(x, y, z, 0.25);
       randomSphereVelocity(rnd(3, 7.5) * s, 2.5);
       S.life = rnd(0.32, 0.6);
       S.size0 = rnd(0.22, 0.36) * s; S.size1 = 0.06;
-      const c = hslToRgb(i / 36, 1, 0.55);
+      const c = hslToRgb(i / n, 1, 0.55);
       S.r0 = c.r * 1.8; S.g0 = c.g * 1.8; S.b0 = c.b * 1.8;
       S.r1 = c.r; S.g1 = c.g; S.b1 = c.b;
       S.a0 = 1; S.a1 = 0;
@@ -1051,7 +1140,7 @@ export class ParticleSystem implements IParticleSystem {
       S.gravity = 0.9; S.atlas = i % 3 === 0 ? ATLAS_SQUARE : ATLAS_SHARD; S.align = 0; S.drag = 1.4;
       this.additive.spawn(S, now);
     }
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0, n = this.n(8); i < n; i++) {
       jitterPosition(x, y, z, 0.4);
       randomSphereVelocity(rnd(0.5, 1.5), 0.8);
       S.life = rnd(0.22, 0.4);
@@ -1066,7 +1155,7 @@ export class ParticleSystem implements IParticleSystem {
   }
 
   private confetti(x: number, y: number, z: number, s: number, now: number): void {
-    const n = Math.round(150 * s);
+    const n = this.n(150 * s);
     for (let i = 0; i < n; i++) {
       jitterPosition(x, y, z, 0.6 * s);
       const a = rnd(0, TAU);
@@ -1085,7 +1174,7 @@ export class ParticleSystem implements IParticleSystem {
 
   private dust(x: number, y: number, z: number, s: number, hex: number, now: number): void {
     const c = rgb(hex);
-    const n = Math.round(10 * s);
+    const n = this.n(10 * s);
     for (let i = 0; i < n; i++) {
       jitterPosition(x, y + 0.1, z, 0.2 * s);
       randomSphereVelocity(rnd(0.4, 1.6) * s, rnd(0.4, 1.2));
@@ -1102,8 +1191,8 @@ export class ParticleSystem implements IParticleSystem {
   private boostRing(x: number, y: number, z: number, s: number, hex: number, now: number): void {
     const c = rgb(hex);
     this.ring(x, y, z, 0.8 * s, 3.6 * s, 0.35, c, 1.8, now);
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * TAU;
+    for (let i = 0, n = this.n(12); i < n; i++) {
+      const a = (i / n) * TAU;
       S.x = x; S.y = y; S.z = z;
       S.vx = Math.cos(a) * 5 * s; S.vy = rnd(0.5, 1.5); S.vz = Math.sin(a) * 5 * s;
       S.life = 0.35;
@@ -1117,7 +1206,7 @@ export class ParticleSystem implements IParticleSystem {
   }
 
   private starSparkle(x: number, y: number, z: number, s: number, now: number): void {
-    const n = Math.round(14 * s);
+    const n = this.n(14 * s);
     for (let i = 0; i < n; i++) {
       jitterPosition(x, y, z, 0.6 * s);
       randomSphereVelocity(rnd(0.8, 2.4), 1.2);
@@ -1151,10 +1240,10 @@ export class ParticleSystem implements IParticleSystem {
       bx += rnd(-0.35, 0.35);
       bz += rnd(-0.35, 0.35);
     }
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0, n = this.n(3); i < n; i++) {
       this.flashSprite(x, y + 0.6 + i * 0.5, z, 2.5 * s, 5 * s, 0.16 + i * 0.03, 1.8, 2.2, 3.0, now);
     }
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0, n = this.n(26); i < n; i++) {
       jitterPosition(x, y + 0.4, z, 0.2);
       randomSphereVelocity(rnd(3, 8), 3);
       S.life = rnd(0.3, 0.6);
@@ -1171,7 +1260,7 @@ export class ParticleSystem implements IParticleSystem {
   private shellBreak(x: number, y: number, z: number, s: number, hex: number, now: number): void {
     const c = rgb(hex);
     // Chunky opaque shards that tumble and fall fast: readable, over in ~0.7 s.
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0, n = this.n(18); i < n; i++) {
       jitterPosition(x, y + 0.1, z, 0.15);
       randomSphereVelocity(rnd(3, 7) * s, 3);
       S.life = rnd(0.4, 0.7);
@@ -1187,7 +1276,7 @@ export class ParticleSystem implements IParticleSystem {
 
   private bananaSplat(x: number, y: number, z: number, s: number, now: number): void {
     const c = rgb(0xffe135);
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0, n = this.n(14); i < n; i++) {
       jitterPosition(x, y + 0.1, z, 0.12);
       randomSphereVelocity(rnd(1, 3.2) * s, 2.2);
       S.life = rnd(0.45, 0.8);
@@ -1202,7 +1291,7 @@ export class ParticleSystem implements IParticleSystem {
   }
 
   private waterSplash(x: number, y: number, z: number, s: number, now: number): void {
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0, n = this.n(30); i < n; i++) {
       jitterPosition(x, y, z, 0.2 * s);
       const a = rnd(0, TAU);
       const sp = rnd(0.8, 2.8) * s;
@@ -1215,7 +1304,7 @@ export class ParticleSystem implements IParticleSystem {
       S.gravity = 1; S.atlas = ATLAS_DOT; S.align = 0; S.drag = 0.4;
       this.additive.spawn(S, now);
     }
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0, n = this.n(8); i < n; i++) {
       jitterPosition(x, y + 0.2, z, 0.3 * s);
       randomSphereVelocity(rnd(0.3, 1.2), 1);
       S.life = rnd(0.6, 1.0);
@@ -1231,13 +1320,13 @@ export class ParticleSystem implements IParticleSystem {
   private lapFlash(x: number, y: number, z: number, s: number, hex: number, now: number): void {
     const c = rgb(hex);
     this.ring(x, y, z, 0.6 * s, 6.5 * s, 0.45, c, 2.0, now);
-    for (let i = 0; i < 22; i++) {
-      const a = (i / 22) * TAU;
+    for (let i = 0, n = this.n(22); i < n; i++) {
+      const a = (i / n) * TAU;
       S.x = x; S.y = y; S.z = z;
       S.vx = Math.cos(a) * rnd(3, 5) * s; S.vy = rnd(1.5, 4); S.vz = Math.sin(a) * rnd(3, 5) * s;
       S.life = rnd(0.5, 0.9);
       S.size0 = 0.3 * s; S.size1 = 0.02;
-      const hc = hslToRgb(i / 22, 1, 0.6);
+      const hc = hslToRgb(i / n, 1, 0.6);
       S.r0 = hc.r * 2.2; S.g0 = hc.g * 2.2; S.b0 = hc.b * 2.2; S.r1 = 1.5; S.g1 = 1.5; S.b1 = 1.5;
       S.a0 = 1; S.a1 = 0;
       S.rot = rnd(0, TAU); S.rotSpeed = rnd(-4, 4);
@@ -1247,7 +1336,7 @@ export class ParticleSystem implements IParticleSystem {
   }
 
   private landPuff(x: number, y: number, z: number, s: number, now: number): void {
-    const n = Math.round(10 * s);
+    const n = this.n(10 * s);
     for (let i = 0; i < n; i++) {
       const a = rnd(0, TAU);
       S.x = x + Math.cos(a) * 0.4; S.y = y + 0.08; S.z = z + Math.sin(a) * 0.4;
@@ -1265,7 +1354,7 @@ export class ParticleSystem implements IParticleSystem {
 
   private shrinkPuff(p: THREE.Vector3): void {
     const now = this.time;
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0, n = this.n(16); i < n; i++) {
       jitterPosition(p.x, p.y + 0.5, p.z, 0.4);
       randomSphereVelocity(rnd(0.8, 2.2), 0.8);
       S.life = rnd(0.5, 0.9);
@@ -1281,6 +1370,26 @@ export class ParticleSystem implements IParticleSystem {
 
   // -------------------------------------------------------------------------
 
+  /**
+   * Kart Party quality knob: 3 = full, 2 = 75 %, 1 = 50 %, 0 = minimal (25 % rates / budget,
+   * no camera streaks). Scales continuous emission rates, one-shot burst counts and the pool
+   * size (vertices drawn). Cheap; safe to call every frame.
+   */
+  setQuality(tier: 0 | 1 | 2 | 3): void {
+    const t = (tier < 0 ? 0 : tier > 3 ? 3 : Math.round(tier)) as 0 | 1 | 2 | 3;
+    this.quality = t;
+    const k = t === 3 ? 1 : t === 2 ? 0.75 : t === 1 ? 0.5 : 0.25;
+    this.rateScale = k;
+    this.burstScale = t === 0 ? 0.35 : k;
+    this.additive.setLimit(ADDITIVE_CAPACITY * k);
+    this.alpha.setLimit(ALPHA_CAPACITY * k);
+  }
+
+  /** Burst particle count scaled by quality (at least 1). */
+  private n(count: number): number {
+    return Math.max(1, Math.round(count * this.burstScale));
+  }
+
   reset(): void {
     this.additive.clear();
     this.alpha.clear();
@@ -1289,6 +1398,7 @@ export class ParticleSystem implements IParticleSystem {
     this.accSmoke.fill(0);
     this.accDust.fill(0);
     this.accStar.fill(0);
+    this.accBurnout.fill(0);
     this.boostSource.fill(BOOST_SOURCE_NONE);
     this.accStreak = 0;
     this.confettiTimer = 0;

@@ -133,7 +133,9 @@ function buildTyres(ctx: BuildContext, group: THREE.Group): void {
   }
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  mesh.castShadow = true;
+  // ~1900 stacks x 192 tris: casting shadows would add ~360k triangles to every shadow pass
+  // (one per viewport in split-screen) for a barely visible contact shadow.
+  mesh.castShadow = false;
   mesh.receiveShadow = true;
   mesh.name = 'tyreBarriers';
   trackMesh(ctx, mesh);

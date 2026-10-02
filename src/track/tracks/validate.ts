@@ -20,7 +20,7 @@ export function validateTrackDefinition(def: TrackDefinition): string[] {
   }
   if (def.halfWidth < 7 || def.halfWidth > 9) warnings.push(`halfWidth ${def.halfWidth} outside 7..9`);
   if (def.wallHalfWidthFactor < 1) warnings.push('wallHalfWidthFactor must be >= 1');
-  for (const t of [...def.itemBoxRows, ...def.boostPads]) {
+  for (const t of [...def.itemBoxRows, ...def.boostPads, ...(def.jumpRamps ?? [])]) {
     if (t < 0 || t >= 1) warnings.push(`t value ${t} outside [0,1)`);
   }
 

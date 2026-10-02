@@ -35,6 +35,13 @@ export interface GameEvents {
   'kart:unshrink': { kartId: number };
   'kart:surfaceChange': { kartId: number; from: SurfaceType; to: SurfaceType };
   'kart:respawn': { kartId: number; position: THREE.Vector3 };
+  // Kart Party additions (ENGINE-B, additive):
+  /** Kart launched off a jump ramp (TrackDefinition.jumpRamps). speed = forward speed at launch (m/s). */
+  'kart:ramp': { kartId: number; speed: number };
+  /** Airborne trick performed (DRIFT pressed in the air after a ramp / big crest). Boost follows on landing. */
+  'kart:trick': { kartId: number };
+  /** Too-early start: wheelspin stall (Kart.applyBurnout). */
+  'kart:burnout': { kartId: number };
 
   // --- items ------------------------------------------------------------
   'item:pickup': { kartId: number; position: THREE.Vector3; isPlayer: boolean };

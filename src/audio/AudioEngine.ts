@@ -25,6 +25,12 @@ const RICH_VOICE_COUNT = 4;
 const VOICE_TIER_INTERVAL = 0.5;
 /** Engine voice slots are indexed by kart id (ids are 0..KART_COUNT-1). */
 const MAX_VOICES = Math.max(KART_COUNT, 16);
+/**
+ * The listener kart (`playerKartId`, e.g. the best-placed human in split-screen) gets the centred
+ * "player" engine voice. A change must persist this long before voices are rebuilt, so a quick
+ * position swap between two humans does not thrash the voices.
+ */
+const LISTENER_SWITCH_DELAY = 0.75;
 
 interface VoiceSlot {
   voice: EngineVoice;
@@ -53,6 +59,10 @@ export class AudioEngine implements IAudioEngine {
   private readonly engines: (VoiceSlot | null)[] = new Array<VoiceSlot | null>(MAX_VOICES).fill(null);
   private frame = 0;
   private voiceTierTimer = 0;
+  /** Kart id that currently owns the centred engine voice (-1 = none yet). */
+  private listenerKartId = -1;
+  private pendingListenerId = -1;
+  private pendingListenerTime = 0;
 
   private _ready = false;
   private _muted = false;
@@ -203,6 +213,7 @@ export class AudioEngine implements IAudioEngine {
       if (slot) slot.voice.dispose();
       this.engines[i] = null;
     }
+    this.listenerKartId = -1;
     this.starFlags.fill(0);
     this.music?.dispose();
     this.music = null;
@@ -264,6 +275,25 @@ export class AudioEngine implements IAudioEngine {
     this.sfx.karts = karts;
     this.sfx.playerKartId = playerKartId;
 
+    // --- listener kart (debounced) ---------------------------------------------------
+    if (playerKartId !== this.listenerKartId) {
+      if (this.listenerKartId < 0 || !findKart(karts, this.listenerKartId)) {
+        this.listenerKartId = playerKartId;
+        this.pendingListenerTime = 0;
+      } else {
+        if (playerKartId !== this.pendingListenerId) {
+          this.pendingListenerId = playerKartId;
+          this.pendingListenerTime = 0;
+        }
+        this.pendingListenerTime += dt;
+        if (this.pendingListenerTime >= LISTENER_SWITCH_DELAY) this.listenerKartId = playerKartId;
+      }
+    } else {
+      this.pendingListenerId = -1;
+      this.pendingListenerTime = 0;
+    }
+    const listenerId = this.listenerKartId;
+
     // --- engines ---------------------------------------------------------------
     const engines = this.engines;
     let playerKart: IKart | null = null;
@@ -273,8 +303,15 @@ export class AudioEngine implements IAudioEngine {
       const id = st.id;
       if (id === playerKartId) playerKart = kart;
       if (id < 0 || id >= MAX_VOICES) continue;
-      const isPlayer = id === playerKartId || st.isPlayer;
+      // Only the listener kart is centred; other humans are positional like the AI so
+      // four humans do not produce four loud centred engine drones.
+      const isPlayer = id === listenerId;
       let slot = engines[id];
+      if (slot && slot.voice.isPlayer !== isPlayer) {
+        slot.voice.dispose();
+        engines[id] = null;
+        slot = null;
+      }
       if (!slot) {
         slot = {
           voice: new EngineVoice(ctx, this.enginesBus, id, st.character.weightClass, isPlayer),
@@ -312,7 +349,7 @@ export class AudioEngine implements IAudioEngine {
         flags[id] = 0;
         continue;
       }
-      if (kart.state.isPlayer || id === playerKartId || kart.state.position.distanceTo(this.camPos) <= STAR_AUDIBLE_DISTANCE) {
+      if (id === playerKartId || kart.state.position.distanceTo(this.camPos) <= STAR_AUDIBLE_DISTANCE) {
         starAudible = true;
       }
     }

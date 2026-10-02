@@ -90,6 +90,8 @@ class Batch {
   }
 }
 
+const NO_SHADOW_PARTS = new Set(['chromeParts', 'pipe', 'accentParts', 'seat', 'steeringWheelMesh', 'rim', 'plates', 'exhaustGlow', 'visor', 'helmetStripe']);
+
 function makeMesh(geo: THREE.BufferGeometry, mat: THREE.Material, name: string): THREE.Mesh {
   const m = new THREE.Mesh(geo, mat);
   m.castShadow = true;
@@ -553,6 +555,12 @@ export function buildKartModel(character: CharacterDef): KartModelPartsEx {
   driverHead.add(stripe);
   driver.add(driverHead);
   root.add(driver);
+
+  // Perf (split-screen renders the shadow map once per viewport): only the big silhouettes cast
+  // shadows; small trim parts (chrome, pipes, accents, seat, steering wheel, rims) do not.
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && NO_SHADOW_PARTS.has(o.name)) o.castShadow = false;
+  });
 
   const dispose = () => {
     for (const g of geometries) g.dispose();

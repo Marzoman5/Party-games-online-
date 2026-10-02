@@ -54,15 +54,17 @@ export class PostFX implements IPostFX {
   private pixelRatio = 1;
 
   private readonly flashColor = new THREE.Color(1, 1, 1);
+  /** Kart whose hits pulse the red vignette (the single viewed human). */
+  private focusKartId = 0;
   private readonly unsubs: (() => void)[] = [];
 
   constructor() {
     this.unsubs.push(events.on('item:lightning', () => this.flash(0xcfe6ff, 0.5)));
     this.unsubs.push(events.on('item:hit', (e) => {
-      if (e.isPlayer) this.hitPulse = 1;
+      if (e.kartId === this.focusKartId) this.hitPulse = 1;
     }));
     this.unsubs.push(events.on('kart:spin', (e) => {
-      if (e.kartId === 0) this.hitPulse = Math.max(this.hitPulse, 0.8);
+      if (e.kartId === this.focusKartId) this.hitPulse = Math.max(this.hitPulse, 0.8);
     }));
   }
 
@@ -131,6 +133,14 @@ export class PostFX implements IPostFX {
       this.failed = true;
       this.disposePipeline();
     }
+  }
+
+  /**
+   * Kart Party: which kart's hits drive the red hit pulse (default 0). PostFX is meant for a
+   * single full-screen view; split-screen should `setEnabled(false)` and render directly.
+   */
+  setFocusKart(kartId: number): void {
+    this.focusKartId = kartId;
   }
 
   setCamera(camera: THREE.Camera): void {

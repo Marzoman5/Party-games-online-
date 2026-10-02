@@ -40,6 +40,7 @@ export const frostbiteFalls: TrackDefinition = {
   wallHalfWidthFactor: 1.5,
   itemBoxRows: [0.08, 0.36, 0.62, 0.9],
   boostPads: [0.22, 0.66, 0.935],
+  jumpRamps: [0.565, 0.965],
   voidRanges: [[0.315, 0.545]],
   environment: {
     skyTop: 0x1e3f7a,

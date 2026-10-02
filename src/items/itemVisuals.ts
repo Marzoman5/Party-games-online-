@@ -49,7 +49,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, item: ItemType): void {
       drawShell(ctx, c, c, 1, '#2fd24a', '#0f6b22', false);
       return;
     case 'red_shell':
-      drawShell(ctx, c, c, 1, '#ff3b30', '#8a1410', false);
+      drawShell(ctx, c, c, 1, '#ff3b30', '#8a1410', false, true);
       return;
     case 'blue_shell':
       drawShell(ctx, c, c, 1, '#2f7bff', '#12348f', true);
@@ -58,7 +58,7 @@ function drawIcon(ctx: CanvasRenderingContext2D, item: ItemType): void {
       drawTriple(ctx, (x, y, s) => drawShell(ctx, x, y, s, '#2fd24a', '#0f6b22', false));
       return;
     case 'triple_red_shell':
-      drawTriple(ctx, (x, y, s) => drawShell(ctx, x, y, s, '#ff3b30', '#8a1410', false));
+      drawTriple(ctx, (x, y, s) => drawShell(ctx, x, y, s, '#ff3b30', '#8a1410', false, true));
       return;
     case 'mushroom':
       drawMushroom(ctx, c, c, 1, '#ff3b30', false);
@@ -127,6 +127,10 @@ function drawBanana(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: nu
   ctx.restore();
 }
 
+/**
+ * Orb projectile icon (BOUNCER / SEEKER / LEADER ZAP): a glossy ball with a white band.
+ * `spiky` adds a ring of spikes and two side fins (LEADER ZAP), `seeker` a targeting reticle.
+ */
 function drawShell(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -135,29 +139,37 @@ function drawShell(
   color: string,
   dark: string,
   spiky: boolean,
+  seeker = false,
 ): void {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.scale(s, s);
   ctx.lineWidth = 2.5;
-  // underside body
-  ctx.fillStyle = '#f5ead0';
-  ctx.strokeStyle = '#3a2a10';
-  ellipse(ctx, 0, 10, 23, 8);
-  ctx.fill();
-  ctx.stroke();
-  // spikes behind the dome
   if (spiky) {
+    // side fins
+    ctx.fillStyle = '#bfe0ff';
+    ctx.strokeStyle = dark;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(side * 16, -2);
+      ctx.lineTo(side * 30, -10);
+      ctx.lineTo(side * 27, 8);
+      ctx.lineTo(side * 16, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    // spikes all around
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#3a3a3a';
-    for (let i = 0; i < 5; i++) {
-      const a = Math.PI + (Math.PI * (i + 0.5)) / 5;
+    ctx.strokeStyle = '#26335a';
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * TAU + Math.PI / 8;
       const bx = Math.cos(a) * 17;
-      const by = 6 + Math.sin(a) * 17;
-      const tx = Math.cos(a) * 28;
-      const ty = 6 + Math.sin(a) * 28;
-      const px = -Math.sin(a) * 4;
-      const py = Math.cos(a) * 4;
+      const by = 2 + Math.sin(a) * 17;
+      const tx = Math.cos(a) * 27;
+      const ty = 2 + Math.sin(a) * 27;
+      const px = -Math.sin(a) * 4.5;
+      const py = Math.cos(a) * 4.5;
       ctx.beginPath();
       ctx.moveTo(bx + px, by + py);
       ctx.lineTo(tx, ty);
@@ -167,56 +179,53 @@ function drawShell(
       ctx.stroke();
     }
   }
-  // dome
-  ctx.beginPath();
-  ctx.ellipse(0, 6, 22, 21, 0, Math.PI, TAU);
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
+  // ball
+  const g = ctx.createRadialGradient(-7, -6, 2, 0, 2, 21);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.25, color);
+  g.addColorStop(1, dark);
+  ctx.fillStyle = g;
   ctx.strokeStyle = dark;
+  ctx.beginPath();
+  ctx.arc(0, 2, 19, 0, TAU);
+  ctx.fill();
   ctx.stroke();
-  // hex plate lines
+  // white equator band
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(0, 6, 22, 21, 0, Math.PI, TAU);
-  ctx.closePath();
+  ctx.arc(0, 2, 19, 0, TAU);
   ctx.clip();
-  ctx.strokeStyle = dark;
-  ctx.lineWidth = 1.6;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.beginPath();
-  ctx.moveTo(-8, -15);
-  ctx.lineTo(-11, -4);
-  ctx.lineTo(-4, 2);
-  ctx.lineTo(4, 2);
-  ctx.lineTo(11, -4);
-  ctx.lineTo(8, -15);
-  ctx.closePath();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(-11, -4);
-  ctx.lineTo(-19, -1);
-  ctx.moveTo(11, -4);
-  ctx.lineTo(19, -1);
-  ctx.moveTo(-4, 2);
-  ctx.lineTo(-6, 9);
-  ctx.moveTo(4, 2);
-  ctx.lineTo(6, 9);
-  ctx.stroke();
-  ctx.restore();
-  // white rim
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#3a2a10';
-  ctx.lineWidth = 2;
-  ellipse(ctx, 0, 6, 22.5, 5);
+  ctx.ellipse(0, 6, 22, 5, 0, 0, TAU);
   ctx.fill();
-  ctx.stroke();
+  ctx.restore();
+  if (seeker) {
+    // targeting reticle
+    ctx.strokeStyle = '#fff6d0';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.arc(0, -4, 6.5, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -13);
+    ctx.lineTo(0, -9);
+    ctx.moveTo(0, 1);
+    ctx.lineTo(0, 5);
+    ctx.moveTo(-9, -4);
+    ctx.lineTo(-5, -4);
+    ctx.moveTo(5, -4);
+    ctx.lineTo(9, -4);
+    ctx.stroke();
+  }
   // highlight
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ellipse(ctx, -9, -7, 5, 3);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ellipse(ctx, -7, -7, 5, 3);
   ctx.fill();
   ctx.restore();
 }
 
+/** TURBO canister icon: a stubby rocket with fins and a flame (gold variant for GOLD TURBO). */
 function drawMushroom(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -228,63 +237,53 @@ function drawMushroom(
   ctx.save();
   ctx.translate(cx, cy);
   ctx.scale(s, s);
+  ctx.rotate(0.55);
   ctx.lineWidth = 2.5;
-  // stem
-  ctx.fillStyle = gold ? '#fff1c4' : '#fff4dc';
-  ctx.strokeStyle = '#3a2a10';
+  ctx.strokeStyle = gold ? '#7a4d00' : '#3a1410';
+  // flame
+  const fg = ctx.createLinearGradient(0, 14, 0, 30);
+  fg.addColorStop(0, '#fff3a0');
+  fg.addColorStop(0.5, '#ff9a1f');
+  fg.addColorStop(1, 'rgba(255,60,20,0)');
+  ctx.fillStyle = fg;
   ctx.beginPath();
-  ctx.roundRect(-11, 2, 22, 20, 7);
+  ctx.moveTo(-7, 14);
+  ctx.quadraticCurveTo(0, 36, 7, 14);
+  ctx.closePath();
   ctx.fill();
-  ctx.stroke();
-  // eyes
-  ctx.fillStyle = '#1c1c22';
-  ellipse(ctx, -5, 13, 2.2, 3.6);
-  ctx.fill();
-  ellipse(ctx, 5, 13, 2.2, 3.6);
-  ctx.fill();
-  // cap
-  const capPath = (): void => {
+  // fins
+  ctx.fillStyle = gold ? '#fff1c4' : '#ffffff';
+  for (const side of [-1, 1]) {
     ctx.beginPath();
-    ctx.ellipse(0, 5, 25, 21, 0, Math.PI, TAU);
+    ctx.moveTo(side * 9, 2);
+    ctx.lineTo(side * 18, 16);
+    ctx.lineTo(side * 9, 14);
     ctx.closePath();
-  };
-  capPath();
-  ctx.fillStyle = capColor;
-  ctx.fill();
-  ctx.save();
-  capPath();
-  ctx.clip();
-  ctx.fillStyle = gold ? '#fff6cf' : '#ffffff';
-  const spots: [number, number, number][] = [
-    [-12, -6, 5],
-    [0, -14, 6],
-    [12, -6, 5],
-    [-21, 2, 4],
-    [21, 2, 4],
-  ];
-  for (const [x, y, r] of spots) {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, TAU);
     ctx.fill();
+    ctx.stroke();
   }
-  if (gold) {
-    const g = ctx.createLinearGradient(-20, -16, 20, 6);
-    g.addColorStop(0, 'rgba(255,255,255,0)');
-    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
-    g.addColorStop(0.55, 'rgba(255,255,255,0.55)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(-26, -18, 52, 26);
-  }
-  ctx.restore();
-  capPath();
-  ctx.strokeStyle = gold ? '#7a4d00' : '#3a2a10';
+  // body
+  ctx.fillStyle = capColor;
+  ctx.beginPath();
+  ctx.moveTo(-9, 14);
+  ctx.lineTo(-9, -8);
+  ctx.quadraticCurveTo(0, -30, 9, -8);
+  ctx.lineTo(9, 14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // window + band
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(-9, 4, 18, 4);
+  ctx.fillStyle = '#9fe6ff';
+  ctx.beginPath();
+  ctx.arc(0, -6, 4.2, 0, TAU);
+  ctx.fill();
   ctx.stroke();
   if (gold) {
-    // sparkle
     ctx.fillStyle = '#ffffff';
-    drawSparkle(ctx, 16, -12, 5);
-    drawSparkle(ctx, -18, -2, 3.5);
+    drawSparkle(ctx, 14, -14, 5);
+    drawSparkle(ctx, -15, -6, 3.5);
   }
   ctx.restore();
 }
@@ -379,68 +378,69 @@ function drawLightning(ctx: CanvasRenderingContext2D, cx: number, cy: number, s:
   ctx.restore();
 }
 
+/** BOOMER icon: a classic round bomb with a red stripe, a fuse and a spark (no face). */
 function drawBobOmb(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number): void {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.scale(s, s);
-  ctx.lineWidth = 2.2;
-  // feet
-  ctx.fillStyle = '#f39a2b';
-  ctx.strokeStyle = '#4a2a05';
-  ellipse(ctx, -9, 25, 7, 4);
-  ctx.fill();
-  ctx.stroke();
-  ellipse(ctx, 9, 25, 7, 4);
-  ctx.fill();
-  ctx.stroke();
-  // wind-up key
-  ctx.fillStyle = '#ffd23a';
-  ctx.strokeStyle = '#6a4a00';
+  // fuse cap
+  ctx.fillStyle = '#5a5a66';
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.rect(17, 3, 9, 4);
-  ctx.fill();
-  ctx.stroke();
-  ellipse(ctx, 27, 5, 4.5, 5.5);
+  ctx.rect(-5, -17, 10, 7);
   ctx.fill();
   ctx.stroke();
   // fuse
-  ctx.strokeStyle = '#6f6f78';
+  ctx.strokeStyle = '#c9a46a';
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(0, -13);
-  ctx.quadraticCurveTo(1, -20, 5, -24);
+  ctx.moveTo(0, -17);
+  ctx.quadraticCurveTo(2, -25, 9, -26);
   ctx.stroke();
   // body
-  ctx.fillStyle = '#1b1b24';
+  const g = ctx.createRadialGradient(-7, -2, 2, 0, 6, 21);
+  g.addColorStop(0, '#5a5a6a');
+  g.addColorStop(0.4, '#23232e');
+  g.addColorStop(1, '#0b0b10');
+  ctx.fillStyle = g;
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 2.2;
   ctx.beginPath();
   ctx.arc(0, 6, 19, 0, TAU);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  ellipse(ctx, -7, -4, 6, 3.5);
+  // red stripe
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0, 6, 19, 0, TAU);
+  ctx.clip();
+  ctx.fillStyle = '#e8322a';
+  ctx.beginPath();
+  ctx.ellipse(0, 8, 22, 4.5, -0.25, 0, TAU);
   ctx.fill();
-  // eyes
-  ctx.fillStyle = '#ffffff';
-  ellipse(ctx, -6, 4, 3, 4.8);
-  ctx.fill();
-  ellipse(ctx, 6, 4, 3, 4.8);
-  ctx.fill();
-  ctx.fillStyle = '#000';
-  ellipse(ctx, -5.5, 5.5, 1.3, 2.2);
-  ctx.fill();
-  ellipse(ctx, 6.5, 5.5, 1.3, 2.2);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ellipse(ctx, -7, -2, 6, 3.5);
   ctx.fill();
   // spark
   ctx.fillStyle = '#ff9a1f';
   ctx.beginPath();
-  ctx.arc(6, -25, 4, 0, TAU);
+  ctx.arc(10, -26, 4.5, 0, TAU);
   ctx.fill();
   ctx.fillStyle = '#fff3b0';
   ctx.beginPath();
-  ctx.arc(6, -25, 1.8, 0, TAU);
+  ctx.arc(10, -26, 2, 0, TAU);
   ctx.fill();
+  ctx.strokeStyle = '#ffd23a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU;
+    ctx.moveTo(10 + Math.cos(a) * 5.5, -26 + Math.sin(a) * 5.5);
+    ctx.lineTo(10 + Math.cos(a) * 9, -26 + Math.sin(a) * 9);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -489,56 +489,6 @@ function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D) => vo
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;
-}
-
-/** Hex-plate pattern shared by all shells (tinted through material.color). */
-function shellTexture(): THREE.Texture {
-  return tex('shellHex', () =>
-    canvasTexture(256, (ctx) => {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, 256, 256);
-      ctx.strokeStyle = 'rgba(0,0,0,0.42)';
-      ctx.lineWidth = 7;
-      ctx.lineJoin = 'round';
-      const r = 40;
-      const h = Math.sqrt(3) * r;
-      for (let row = -1; row < 6; row++) {
-        for (let col = -1; col < 5; col++) {
-          const cx = col * r * 3 + (row % 2 === 0 ? 0 : r * 1.5);
-          const cy = (row * h) / 2;
-          ctx.beginPath();
-          for (let i = 0; i < 6; i++) {
-            const a = (i * Math.PI) / 3;
-            const x = cx + Math.cos(a) * r;
-            const y = cy + Math.sin(a) * r;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          }
-          ctx.closePath();
-          ctx.stroke();
-        }
-      }
-    }),
-  );
-}
-
-/** Mushroom cap texture: base colour with a pole spot (full-width band at v=0) and a ring of spots. */
-function mushroomCapTexture(key: string, base: string, spot: string): THREE.Texture {
-  return tex(key, () =>
-    canvasTexture(256, (ctx) => {
-      ctx.fillStyle = base;
-      ctx.fillRect(0, 0, 256, 256);
-      ctx.fillStyle = spot;
-      // pole spot -> maps to a round spot on the top of the hemisphere
-      ctx.fillRect(0, 0, 256, 26);
-      for (let i = 0; i < 5; i++) {
-        const x = 26 + i * 51.2;
-        ctx.beginPath();
-        ctx.ellipse(x, 96, 22, 26, 0, 0, TAU);
-        ctx.fill();
-      }
-    }),
-  );
 }
 
 function questionTexture(): THREE.Texture {
@@ -622,98 +572,122 @@ function buildBanana(): THREE.Object3D {
   return g;
 }
 
+/** Orb projectile mesh (BOUNCER / SEEKER / LEADER ZAP). */
 function buildShell(color: number, key: string, spiky: boolean): THREE.Object3D {
   const g = new THREE.Group();
-  const dome = new THREE.Mesh(
-    geo('shellDome', () => new THREE.SphereGeometry(0.42, 12, 6, 0, TAU, 0, Math.PI / 2)),
-    standard(`shell_${key}`, { color, roughness: 0.35, metalness: 0.05, map: shellTexture() }),
+  const R = 0.34;
+  const ball = new THREE.Mesh(
+    geo('orbBall', () => new THREE.SphereGeometry(R, 14, 10)),
+    standard(`orb_${key}`, { color, roughness: 0.25, metalness: 0.15, emissive: color, emissiveIntensity: 0.18 }),
   );
-  dome.castShadow = true;
-  g.add(dome);
-  const rim = new THREE.Mesh(
-    geo('shellRim', () => new THREE.TorusGeometry(0.4, 0.065, 6, 16)),
-    standard('shellRim', { color: 0xfaf3e0, roughness: 0.5 }),
+  ball.castShadow = true;
+  g.add(ball);
+  const band = new THREE.Mesh(
+    geo('orbBand', () => new THREE.TorusGeometry(R * 1.0, 0.045, 6, 20)),
+    standard('orbBand', { color: 0xffffff, roughness: 0.4 }),
   );
-  rim.rotation.x = Math.PI / 2;
-  g.add(rim);
-  const body = new THREE.Mesh(
-    geo('shellBody', () => new THREE.CylinderGeometry(0.36, 0.3, 0.16, 12, 1, false)),
-    standard('shellBody', { color: 0xf1e2b8, roughness: 0.6 }),
-  );
-  body.position.y = -0.1;
-  g.add(body);
+  band.rotation.x = Math.PI / 2;
+  g.add(band);
+  if (key === 'red') {
+    // seeker "lens" on the front
+    const lens = new THREE.Mesh(
+      geo('orbLens', () => new THREE.CylinderGeometry(0.11, 0.11, 0.05, 12)),
+      standard('orbLens', { color: 0xfff6d0, emissive: 0xffe08a, emissiveIntensity: 1.6, roughness: 0.3 }),
+    );
+    lens.rotation.x = Math.PI / 2;
+    lens.position.set(0, 0.08, -R * 0.95);
+    g.add(lens);
+  }
   if (spiky) {
-    const spikeGeo = geo('shellSpike', () => new THREE.ConeGeometry(0.07, 0.18, 5));
-    const spikeMat = standard('shellSpike', { color: 0xffffff, roughness: 0.3 });
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * TAU;
-      const spike = new THREE.Mesh(spikeGeo, spikeMat);
-      const dir = new THREE.Vector3(Math.cos(a) * 0.72, 0.7, Math.sin(a) * 0.72).normalize();
-      spike.position.copy(dir).multiplyScalar(0.44);
-      spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      g.add(spike);
+    const spikeGeo = geo('orbSpike', () => new THREE.ConeGeometry(0.075, 0.2, 6));
+    const spikeMat = standard('orbSpike', { color: 0xf2f6ff, roughness: 0.3, metalness: 0.3 });
+    const up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * TAU;
+      for (const yy of [0.45, -0.25]) {
+        if (yy < 0 && i % 2 === 1) continue;
+        const dir = new THREE.Vector3(Math.cos(a), yy, Math.sin(a)).normalize();
+        const spike = new THREE.Mesh(spikeGeo, spikeMat);
+        spike.position.copy(dir).multiplyScalar(R + 0.06);
+        spike.quaternion.setFromUnitVectors(up, dir);
+        g.add(spike);
+      }
     }
     const top = new THREE.Mesh(spikeGeo, spikeMat);
-    top.position.y = 0.46;
+    top.position.y = R + 0.07;
     g.add(top);
-    // wing-like fins
-    const finGeo = geo('shellFin', () => {
+    // stabiliser fins on both sides (swept back, like a missile)
+    const finGeo = geo('orbFin', () => {
       const shape = new THREE.Shape();
       shape.moveTo(0, 0);
-      shape.lineTo(0.55, 0.12);
-      shape.lineTo(0.62, 0.34);
-      shape.lineTo(0.05, 0.2);
+      shape.lineTo(0.3, 0.06);
+      shape.lineTo(0.36, 0.3);
+      shape.lineTo(0.08, 0.16);
       shape.closePath();
       return new THREE.ShapeGeometry(shape);
     });
-    const finMat = standard('shellFin', { color: 0xffffff, roughness: 0.4, side: THREE.DoubleSide });
+    const finMat = standard('orbFin', { color: 0x9fd0ff, roughness: 0.35, emissive: 0x2f7bff, emissiveIntensity: 0.4, side: THREE.DoubleSide });
     for (let i = -1; i <= 1; i += 2) {
       const fin = new THREE.Mesh(finGeo, finMat);
-      fin.position.set(i * 0.34, 0.05, 0.12);
-      fin.rotation.y = i > 0 ? 0 : Math.PI;
-      fin.rotation.z = i * -0.15;
+      fin.position.set(i * (R - 0.02), -0.05, 0.05);
+      fin.rotation.set(Math.PI / 2, 0, i > 0 ? -0.35 : Math.PI + 0.35);
       g.add(fin);
     }
   }
-  g.position.y = 0.2;
+  g.position.y = R;
   return g;
 }
 
+/** TURBO canister mesh: an upright stubby rocket (gold variant for GOLD TURBO). */
 function buildMushroom(gold: boolean): THREE.Object3D {
   const g = new THREE.Group();
-  const capTex = gold
-    ? mushroomCapTexture('capGold', '#f2b31a', '#fff2b8')
-    : mushroomCapTexture('capRed', '#e5261c', '#ffffff');
-  const cap = new THREE.Mesh(
-    geo('mushCap', () => new THREE.SphereGeometry(0.4, 14, 8, 0, TAU, 0, Math.PI * 0.56)),
-    gold
-      ? standard('mushCapGold', { map: capTex, roughness: 0.28, metalness: 0.75, emissive: 0x3a2400, emissiveIntensity: 0.6 })
-      : standard('mushCapRed', { map: capTex, roughness: 0.4, metalness: 0.0 }),
+  const bodyMat = gold
+    ? standard('turboGold', { color: 0xf2b31a, roughness: 0.28, metalness: 0.75, emissive: 0x3a2400, emissiveIntensity: 0.6 })
+    : standard('turboRed', { color: 0xe5261c, roughness: 0.35, metalness: 0.2 });
+  const body = new THREE.Mesh(geo('turboBody', () => new THREE.CylinderGeometry(0.17, 0.19, 0.42, 12)), bodyMat);
+  body.castShadow = true;
+  g.add(body);
+  const nose = new THREE.Mesh(geo('turboNose', () => new THREE.ConeGeometry(0.17, 0.26, 12)), bodyMat);
+  nose.position.y = 0.34;
+  g.add(nose);
+  const band = new THREE.Mesh(
+    geo('turboBand', () => new THREE.CylinderGeometry(0.182, 0.182, 0.06, 12)),
+    standard('turboBand', { color: 0xffffff, roughness: 0.5 }),
   );
-  cap.castShadow = true;
-  g.add(cap);
-  const under = new THREE.Mesh(
-    geo('mushUnder', () => new THREE.CircleGeometry(0.4 * Math.sin(Math.PI * 0.56), 14)),
-    standard('mushUnder', { color: 0xf7e3bd, roughness: 0.8, side: THREE.DoubleSide }),
+  band.position.y = 0.06;
+  g.add(band);
+  const window_ = new THREE.Mesh(
+    geo('turboWindow', () => new THREE.SphereGeometry(0.06, 8, 6)),
+    standard('turboWindow', { color: 0x9fe6ff, emissive: 0x2a8fb0, emissiveIntensity: 0.6, roughness: 0.2 }),
   );
-  under.rotation.x = Math.PI / 2;
-  under.position.y = 0.4 * Math.cos(Math.PI * 0.56);
-  g.add(under);
-  const stem = new THREE.Mesh(
-    geo('mushStem', () => new THREE.CylinderGeometry(0.2, 0.24, 0.36, 10, 1)),
-    standard('mushStem', { color: gold ? 0xfff0c0 : 0xfff6e0, roughness: 0.7 }),
-  );
-  stem.position.y = -0.2;
-  g.add(stem);
-  const eyeGeo = geo('mushEye', () => new THREE.SphereGeometry(0.035, 6, 4));
-  const eyeMat = standard('mushEye', { color: 0x151518, roughness: 0.5 });
-  for (let i = -1; i <= 1; i += 2) {
-    const eye = new THREE.Mesh(eyeGeo, eyeMat);
-    eye.position.set(i * 0.08, -0.16, -0.21);
-    eye.scale.set(1, 1.6, 1);
-    g.add(eye);
+  window_.position.set(0, 0.16, -0.16);
+  window_.scale.set(1, 1, 0.5);
+  g.add(window_);
+  const finGeo = geo('turboFin', () => {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(0.16, -0.12);
+    shape.lineTo(0.16, -0.24);
+    shape.lineTo(0, -0.16);
+    shape.closePath();
+    return new THREE.ShapeGeometry(shape);
+  });
+  const finMat = standard(gold ? 'turboFinGold' : 'turboFin', { color: gold ? 0xfff0c0 : 0xffffff, roughness: 0.5, side: THREE.DoubleSide });
+  for (let i = 0; i < 3; i++) {
+    const fin = new THREE.Mesh(finGeo, finMat);
+    const a = (i / 3) * TAU;
+    fin.position.set(Math.cos(a) * 0.17, -0.06, Math.sin(a) * 0.17);
+    fin.rotation.y = -a;
+    g.add(fin);
   }
-  g.position.y = 0.42;
+  const flame = new THREE.Mesh(
+    geo('turboFlame', () => new THREE.ConeGeometry(0.12, 0.26, 8)),
+    mat('turboFlame', () => new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85, toneMapped: false })),
+  );
+  flame.rotation.x = Math.PI;
+  flame.position.y = -0.34;
+  g.add(flame);
+  g.position.y = 0.48;
   return g;
 }
 
@@ -750,54 +724,43 @@ function buildStar(): THREE.Object3D {
   return g;
 }
 
+/** BOOMER mesh: round bomb with a red stripe, metal cap and burning fuse (no face / feet). */
 function buildBobOmb(): THREE.Object3D {
   const g = new THREE.Group();
   const body = new THREE.Mesh(
-    geo('bombBody', () => new THREE.SphereGeometry(0.36, 12, 8)),
+    geo('bombBody', () => new THREE.SphereGeometry(0.36, 14, 10)),
     standard('bombBody', { color: 0x15151c, roughness: 0.35, metalness: 0.3 }),
   );
   body.name = 'bombBody';
   body.castShadow = true;
   g.add(body);
-  const footGeo = geo('bombFoot', () => new THREE.CylinderGeometry(0.08, 0.09, 0.07, 8));
-  const footMat = standard('bombFoot', { color: 0xf39a2b, roughness: 0.6 });
-  for (let i = -1; i <= 1; i += 2) {
-    const foot = new THREE.Mesh(footGeo, footMat);
-    foot.position.set(i * 0.16, -0.36, 0.03);
-    g.add(foot);
-  }
-  const keyMat = standard('bombKey', { color: 0xffd23a, roughness: 0.3, metalness: 0.6 });
-  const shaft = new THREE.Mesh(geo('bombKeyShaft', () => new THREE.CylinderGeometry(0.03, 0.03, 0.16, 6)), keyMat);
-  shaft.rotation.z = Math.PI / 2;
-  shaft.position.set(0.42, 0.02, 0);
-  g.add(shaft);
-  const ring = new THREE.Mesh(geo('bombKeyRing', () => new THREE.TorusGeometry(0.09, 0.022, 4, 8)), keyMat);
-  ring.rotation.y = Math.PI / 2;
-  ring.position.set(0.53, 0.02, 0);
-  g.add(ring);
-  const fuse = new THREE.Mesh(
-    geo('bombFuse', () => new THREE.CylinderGeometry(0.025, 0.025, 0.16, 5)),
-    standard('bombFuse', { color: 0x777780, roughness: 0.9 }),
+  const stripe = new THREE.Mesh(
+    geo('bombStripe', () => new THREE.TorusGeometry(0.355, 0.04, 6, 24)),
+    standard('bombStripe', { color: 0xe8322a, roughness: 0.4, emissive: 0x5a0a06, emissiveIntensity: 0.5 }),
   );
-  fuse.position.set(0.03, 0.42, 0);
-  fuse.rotation.z = -0.25;
+  stripe.rotation.x = Math.PI / 2 - 0.25;
+  g.add(stripe);
+  const cap = new THREE.Mesh(
+    geo('bombCap', () => new THREE.CylinderGeometry(0.1, 0.12, 0.1, 10)),
+    standard('bombCap', { color: 0x777784, roughness: 0.4, metalness: 0.7 }),
+  );
+  cap.position.set(0, 0.38, 0);
+  g.add(cap);
+  const fuse = new THREE.Mesh(
+    geo('bombFuse', () => new THREE.CylinderGeometry(0.022, 0.022, 0.16, 5)),
+    standard('bombFuse', { color: 0xc9a46a, roughness: 0.9 }),
+  );
+  fuse.position.set(0.03, 0.49, 0);
+  fuse.rotation.z = -0.35;
   g.add(fuse);
   const tip = new THREE.Mesh(
-    geo('bombTip', () => new THREE.SphereGeometry(0.05, 6, 4)),
+    geo('bombTip', () => new THREE.SphereGeometry(0.055, 6, 4)),
     standard('bombTip', { color: 0xffb020, emissive: 0xff7a00, emissiveIntensity: 2.5, roughness: 0.5 }),
   );
   tip.name = 'bombTip';
-  tip.position.set(0.05, 0.51, 0);
+  tip.position.set(0.06, 0.58, 0);
   g.add(tip);
-  const eyeGeo = geo('bombEye', () => new THREE.SphereGeometry(0.05, 6, 4));
-  const eyeMat = standard('bombEye', { color: 0xffffff, roughness: 0.4 });
-  for (let i = -1; i <= 1; i += 2) {
-    const eye = new THREE.Mesh(eyeGeo, eyeMat);
-    eye.position.set(i * 0.11, 0.02, -0.33);
-    eye.scale.set(1, 1.5, 0.6);
-    g.add(eye);
-  }
-  g.position.y = 0.43;
+  g.position.y = 0.37;
   return g;
 }
 

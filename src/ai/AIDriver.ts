@@ -37,6 +37,10 @@ const BOX_SEEK_DISTANCE = 60;
 const STUCK_SECONDS = 1.5;
 const REVERSE_SECONDS = 0.8;
 const RECOVER_COOLDOWN = 2.5;
+/** Racing time after which "stuck" detection is armed even if the kart never moved (AI takeover). */
+const ARM_STUCK_AFTER = 2.5;
+/** Recoveries within this window escalate to longer reversing with full lock. */
+const RECOVER_ESCALATE_WINDOW = 10;
 
 interface DifficultyProfile {
   noise: number;
@@ -48,6 +52,8 @@ interface DifficultyProfile {
   easeThrottle: number;
   usesMushrooms: boolean;
   startThrottleBeforeGo: number;
+  /** Probability of performing a trick on each ramp / big-crest jump. */
+  trickChance: number;
 }
 
 const PROFILES: Record<Difficulty, DifficultyProfile> = {
@@ -61,6 +67,7 @@ const PROFILES: Record<Difficulty, DifficultyProfile> = {
     easeThrottle: 0.6,
     usesMushrooms: false,
     startThrottleBeforeGo: 0.55,
+    trickChance: 0.35,
   },
   normal: {
     noise: 0.045,
@@ -72,6 +79,7 @@ const PROFILES: Record<Difficulty, DifficultyProfile> = {
     easeThrottle: 0.65,
     usesMushrooms: true,
     startThrottleBeforeGo: 0.45,
+    trickChance: 0.7,
   },
   hard: {
     noise: 0.015,
@@ -83,6 +91,7 @@ const PROFILES: Record<Difficulty, DifficultyProfile> = {
     easeThrottle: 0.75,
     usesMushrooms: true,
     startThrottleBeforeGo: 0.3,
+    trickChance: 0.95,
   },
 };
 
@@ -173,6 +182,15 @@ export class AIDriver implements IAIDriver {
   private driftCooldown = 0;
   private frozenTime = 0;
   private sinceCountOne = -1;
+  private racingTime = 0;
+  private recoverCount = 0;
+  private lastRecoverAt = -100;
+  private recoverSteer = 0;
+  // tricks
+  private airPhase = false;
+  private trickWill = false;
+  private trickDelay = 0;
+  private trickSteer = 0;
 
   constructor(kart: IKart, difficulty: Difficulty, personalitySeed: number) {
     installListeners();
@@ -250,6 +268,10 @@ export class AIDriver implements IAIDriver {
     }
     this.frozenTime = 0;
     this.sinceCountOne = -1;
+    this.racingTime += dt;
+    // A driver created mid-race (AI takeover of a disconnected human) may start stuck at 0 m/s:
+    // arm stuck / wrong-way recovery after a short grace period even if it never moved.
+    if (this.racingTime > ARM_STUCK_AFTER) this.movedOnce = true;
 
     // ----- spinning / squished: hold throttle, do nothing clever -----------
     if (s.isSpinning) {
@@ -283,7 +305,9 @@ export class AIDriver implements IAIDriver {
       this.recoverTimer -= dt;
       inp.throttle = 0;
       inp.brake = 1;
-      inp.steer = -Math.sign(tangentAngle) * 0.9;
+      // Reverse steering is mirrored by the kart; steer away from the track direction error.
+      const sgn = Math.sign(tangentAngle) || this.recoverSteer || 1;
+      inp.steer = -sgn * (this.recoverCount >= 3 ? 1 : 0.9);
       inp.drift = false;
       this.driftWant = false;
       this.hasPrev = false;
@@ -292,9 +316,16 @@ export class AIDriver implements IAIDriver {
     }
     const stuck = this.movedOnce && !s.isAirborne && Math.abs(speed) < 1 && !s.finished;
     this.stuckTimer = stuck ? this.stuckTimer + dt : 0;
-    if (this.recoverCooldown <= 0 && ((s.wrongWay && Math.abs(speed) < 6 && this.movedOnce) || this.stuckTimer > STUCK_SECONDS)) {
-      this.recoverTimer = REVERSE_SECONDS;
-      this.recoverCooldown = RECOVER_COOLDOWN + REVERSE_SECONDS;
+    // Facing far away from the track direction while slow also counts (wrongWay is written by the
+    // race manager and may be missing for a freshly taken-over kart).
+    const facingBack = Math.abs(tangentAngle) > 2.0 && Math.abs(speed) < 4 && this.movedOnce;
+    if (this.recoverCooldown <= 0 && ((s.wrongWay && Math.abs(speed) < 6 && this.movedOnce) || facingBack || this.stuckTimer > STUCK_SECONDS)) {
+      this.recoverCount = this.time - this.lastRecoverAt < RECOVER_ESCALATE_WINDOW ? this.recoverCount + 1 : 1;
+      this.lastRecoverAt = this.time;
+      this.recoverSteer = this.recoverCount % 2 === 0 ? -1 : 1;
+      const rev = REVERSE_SECONDS * (this.recoverCount >= 3 ? 1.8 : 1);
+      this.recoverTimer = rev;
+      this.recoverCooldown = RECOVER_COOLDOWN + rev;
       this.stuckTimer = 0;
       this.driftWant = false;
     }
@@ -397,7 +428,8 @@ export class AIDriver implements IAIDriver {
     // rubber-banding against the player
     let gap = 0;
     if (playerKart && playerKart !== this.kart) gap = (playerKart.state.raceProgress - s.raceProgress) * len;
-    const factor = this.speedFactor(gap) * (1 + this.skillJitter);
+    // A human kart driven by the AI (disconnect / autopilot) is never handicapped.
+    const factor = s.isPlayer ? 1 : this.speedFactor(gap) * (1 + this.skillJitter);
     const targetSpeed = factor * top;
     if (!s.isBoosting && speed > targetSpeed) {
       throttle = Math.min(throttle, clamp(1 - (speed - targetSpeed) / (0.05 * top), 0, 1));
@@ -498,8 +530,25 @@ export class AIDriver implements IAIDriver {
       }
     }
 
-    // ----- airborne: neutral steering --------------------------------------------------
-    if (s.isAirborne && !s.isHopping) steer = 0;
+    // ----- airborne: neutral steering + tricks -------------------------------------------
+    if (s.isAirborne && !s.isHopping) {
+      steer = 0;
+      drift = false;
+      this.driftWant = false;
+      if (!this.airPhase) {
+        this.airPhase = true;
+        this.trickWill = this.rng() < prof.trickChance;
+        this.trickDelay = (this.difficulty === 'hard' ? 0.04 : 0.08) + this.rng() * 0.16;
+        this.trickSteer = this.rng() < 0.5 ? 0 : this.rng() < 0.5 ? -0.7 : 0.7;
+      }
+      if (this.trickWill && s.trickReady === true && s.airTime >= this.trickDelay && !this.kart.input.drift) {
+        drift = true;
+        steer = this.trickSteer;
+        this.trickWill = false;
+      }
+    } else {
+      this.airPhase = false;
+    }
 
     inp.throttle = clamp(throttle, 0, 1);
     inp.brake = 0;

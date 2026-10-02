@@ -254,3 +254,37 @@ window.__party = {
   skipTutorial(): void,
 }
 ```
+
+## Kart Party contract additions
+
+(ENGINE-B, all additive / optional — no existing member changed.)
+
+**`src/core/constants.ts`**
+- `GAME_TITLE` is now `'KART PARTY'`.
+- New: `JUMP_RAMP_LENGTH = 7`, `JUMP_RAMP_HEIGHT = 1.1`, `JUMP_RAMP_MIN_SPEED = 7` (m/s, scaled by the kart's speed scale),
+  `TRICK_BOOST_STRENGTH = 0.4`, `TRICK_BOOST_DURATION = 0.9`.
+
+**`src/core/events.ts`** (new events)
+- `'kart:ramp': { kartId: number; speed: number }` — launched off a jump ramp.
+- `'kart:trick': { kartId: number }` — mid-air trick performed (boost `applyBoost(0.4, 0.9, 'trick')` follows on landing unless hit).
+- `'kart:burnout': { kartId: number }` — too-early start wheelspin (see `applyBurnout`).
+
+**`src/core/types.ts`**
+- `TrackDefinition.jumpRamps?: number[]` — t positions of jump ramps (kicker starts at t, lip `JUMP_RAMP_LENGTH` m later).
+- `SurfaceQuery.ramp?: number` — 0..1 progress along a ramp under the queried point (groundY includes the ramp), -1 otherwise.
+- `interface JumpRampInfo { t; tEnd; position (lip centre); forward; halfWidth; length; height }`.
+- `ITrack.jumpRamps?: readonly JumpRampInfo[]`, `ITrack.setDetail?(tier: 0|1|2|3): void` (decor instance counts / shadows / tyre LOD; 3 = full).
+- `KartState.trickReady?: boolean` (airborne and DRIFT would trick now — good for a HUD prompt), `KartState.isTricking?: boolean`,
+  `KartState.isBurningOut?: boolean`, `KartState.speedScale?: number`.
+- `IKart.setSpeedScale?(scale: number): void` (cc class: 50cc 0.8, 100cc 0.92, 150cc 1.0; scales top speed + acceleration,
+  `topSpeed()` reflects it), `IKart.applyBurnout?(): void` (~0.9 s wheelspin stall + smoke; call right after `setFrozen(false)`).
+- `IParticleSystem.setQuality?(tier: 0|1|2|3): void` (emission rates, burst counts, pool size; streaks only at tier ≥ 2 and only
+  when exactly one kart has `isPlayer`).
+
+**Semantics notes**
+- Tricks: while airborne after a ramp (or a crest jump with ≥ 0.55 s predicted air time), a rising edge of `input.drift`
+  performs a trick (body roll / flip). Getting hit (`applyHit`) cancels it. AI performs tricks by difficulty (35/70/95 %).
+- `AudioEngine.update(..., playerKartId, ...)`: only `playerKartId` gets the centred engine voice (debounced 0.75 s when it
+  changes); other human karts are positional like AI. HUD-like SFX (roulette, lap bell, finish, position change, wrong way)
+  play for every human kart, at reduced volume (0.3) unless it is the listener kart.
+- `PostFX.setFocusKart(kartId)` (class method, not in IPostFX): which kart's hits drive the red hit pulse (default 0).

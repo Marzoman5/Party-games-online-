@@ -156,6 +156,12 @@ export interface TrackDefinition {
   boostPads: number[];
   /** Optional t ranges (start, end) that are 'void' beyond the road edge instead of walls. */
   voidRanges?: [number, number][];
+  /**
+   * Kart Party (ENGINE-B): optional t positions (0..1) of jump ramps. Each ramp is a kicker
+   * starting at t that rises over JUMP_RAMP_LENGTH metres to JUMP_RAMP_HEIGHT; karts crossing
+   * its lip fast enough are launched and can perform a trick (DRIFT in the air) for a boost.
+   */
+  jumpRamps?: number[];
   environment: EnvironmentDef;
   /** Colours used by the track builder. */
   palette: {
@@ -199,6 +205,26 @@ export interface SurfaceQuery {
   binormal: THREE.Vector3;
   /** Centerline point at t. */
   center: THREE.Vector3;
+  /**
+   * Kart Party (ENGINE-B): progress 0..1 along a jump ramp under this position (groundY already
+   * includes the ramp height), or -1 / undefined when not on a ramp.
+   */
+  ramp?: number;
+}
+
+/** Kart Party (ENGINE-B): a jump ramp placed on the road (see TrackDefinition.jumpRamps). */
+export interface JumpRampInfo {
+  /** Track t where the ramp starts (bottom edge). */
+  t: number;
+  /** Track t of the lip (top edge). */
+  tEnd: number;
+  /** World position of the lip centre (on the road surface, without ramp height). */
+  position: THREE.Vector3;
+  /** Horizontal forward direction (unit). */
+  forward: THREE.Vector3;
+  halfWidth: number;
+  length: number;
+  height: number;
 }
 
 export interface Checkpoint {
@@ -242,6 +268,10 @@ export interface ITrack {
   /** Boost pad centre positions + their forward directions. */
   readonly boostPads: readonly { position: THREE.Vector3; forward: THREE.Vector3; halfWidth: number }[];
   readonly minimap: MinimapData;
+  /** Kart Party (ENGINE-B, optional): jump ramps on this track (empty if none). */
+  readonly jumpRamps?: readonly JumpRampInfo[];
+  /** Kart Party (ENGINE-B, optional): 0..3 decoration detail (3 = full). Cheap; may be called any time. */
+  setDetail?(tier: 0 | 1 | 2 | 3): void;
   /** Sample the centerline frame at t (wraps). */
   sample(t: number, out?: TrackSample): TrackSample;
   /** Closest t to a world position. hintT speeds up the search and avoids jumps. */
@@ -352,6 +382,16 @@ export interface KartState {
   surface: SurfaceType;
   /** Wheel spin angle for animation. */
   wheelSpin: number;
+
+  // --- Kart Party additions (ENGINE-B, optional, written by Kart) -------------------------
+  /** Airborne and a trick can be performed right now (press DRIFT). */
+  trickReady?: boolean;
+  /** A trick was performed during the current air time (boost on landing). */
+  isTricking?: boolean;
+  /** Too-early-start wheelspin stall in progress (see Kart.applyBurnout). */
+  isBurningOut?: boolean;
+  /** Top speed / acceleration multiplier (cc class), see Kart.setSpeedScale. Default 1. */
+  speedScale?: number;
 }
 
 export interface IKart {
@@ -380,6 +420,10 @@ export interface IKart {
   forwardDir(out?: THREE.Vector3): THREE.Vector3;
   /** Convenience: scaled top speed for this character (m/s). */
   topSpeed(): number;
+  /** Kart Party (ENGINE-B, optional): cc-class multiplier for top speed + acceleration (1 = 150cc). */
+  setSpeedScale?(scale: number): void;
+  /** Kart Party (ENGINE-B, optional): too-early start wheelspin stall (~0.9 s) + smoke. */
+  applyBurnout?(): void;
   dispose(): void;
 }
 
@@ -460,6 +504,8 @@ export interface IParticleSystem {
   /** Per-frame: emits continuous effects (drift sparks, boost flames, tyre smoke, offroad dust, star glow) from kart states. */
   update(dt: number, karts: readonly IKart[], camera: THREE.Camera): void;
   emit(preset: ParticlePreset, position: THREE.Vector3, options?: { color?: number; scale?: number; direction?: THREE.Vector3 }): void;
+  /** Kart Party (ENGINE-B, optional): 0 = minimal .. 3 = full emission rates / particle budget. */
+  setQuality?(tier: 0 | 1 | 2 | 3): void;
   reset(): void;
   dispose(): void;
 }

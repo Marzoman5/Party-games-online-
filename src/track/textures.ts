@@ -666,7 +666,7 @@ export function makeBillboardTexture(variant: number): THREE.CanvasTexture {
   ctx.shadowBlur = 0;
   ctx.fillStyle = t.b;
   ctx.font = '700 30px Arial, sans-serif';
-  ctx.fillText(variant % 2 === 0 ? 'KART  •  RUSH  •  NIGHT' : 'DRIFT  •  BOOST  •  WIN', W / 2, H - 40);
+  ctx.fillText(variant % 2 === 0 ? 'KART  •  PARTY  •  NIGHT' : 'DRIFT  •  BOOST  •  WIN', W / 2, H - 40);
   return finishTexture(canvas, { repeat: false });
 }
 
@@ -696,5 +696,49 @@ export function makeGlowTexture(inner: string, outer: string): THREE.CanvasTextu
   g.addColorStop(1, outer);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, S, S);
+  return finishTexture(canvas, { repeat: false });
+}
+
+/**
+ * Jump ramp top (Kart Party): bold diagonal hazard stripes with a bright lip band at the top
+ * (v = 1 = lip, CanvasTexture flips Y so the lip is the canvas top) and an upward arrow.
+ */
+export function makeRampTexture(): THREE.CanvasTexture {
+  const W = 256;
+  const H = 256;
+  const { canvas, ctx } = makeCanvas(W, H);
+  ctx.fillStyle = '#ffc21a';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#1c1c22';
+  const stripe = 36;
+  for (let x = -H; x < W + H; x += stripe * 2) {
+    ctx.beginPath();
+    ctx.moveTo(x, H);
+    ctx.lineTo(x + stripe, H);
+    ctx.lineTo(x + stripe + H, 0);
+    ctx.lineTo(x + H, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // lip band
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, 18);
+  ctx.fillStyle = '#ff3b6b';
+  ctx.fillRect(0, 18, W, 8);
+  // big up-arrow in the middle (dark outline + white fill)
+  ctx.beginPath();
+  ctx.moveTo(W / 2, 46);
+  ctx.lineTo(W / 2 + 62, 132);
+  ctx.lineTo(W / 2 + 26, 132);
+  ctx.lineTo(W / 2 + 26, 214);
+  ctx.lineTo(W / 2 - 26, 214);
+  ctx.lineTo(W / 2 - 26, 132);
+  ctx.lineTo(W / 2 - 62, 132);
+  ctx.closePath();
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = '#1c1c22';
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
   return finishTexture(canvas, { repeat: false });
 }

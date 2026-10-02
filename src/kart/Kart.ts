@@ -1,5 +1,5 @@
 /**
- * Kart - arcade physics (Mario Kart style), visuals animation, and the
+ * Kart - arcade physics (classic kart-racer style), visuals animation, and the
  * KartState contract. Physics runs at FIXED_DT via `update`; visual-only
  * animation runs at render rate via `updateVisuals`.
  *
@@ -21,7 +21,14 @@ import type {
 } from '../core/types';
 import { createEmptyInput } from '../core/types';
 import { events } from '../core/events';
-import { BASE_TOP_SPEED, GRAVITY, KART_RADIUS } from '../core/constants';
+import {
+  BASE_TOP_SPEED,
+  GRAVITY,
+  JUMP_RAMP_MIN_SPEED,
+  KART_RADIUS,
+  TRICK_BOOST_DURATION,
+  TRICK_BOOST_STRENGTH,
+} from '../core/constants';
 import { TAU, clamp, clamp01, damp, lerp, smoothstep, wrapAngle } from '../core/math';
 import { buildKartModel, type KartModelPartsEx } from './KartModel';
 
@@ -68,6 +75,24 @@ const GROUND_STICK = 0.12;
 const GROUND_LAUNCH_VY = 1.0;
 const ACCENT_EMISSIVE = 0.32;
 const DRIFT_STAGE_COLORS: readonly number[] = [0, 0x4db8ff, 0xffa53d, 0xd46bff];
+// --- Kart Party: ramps, tricks, burnout, cc scaling ---------------------------------
+/** Ramp progress (0..1 along the kicker) at which the launch impulse fires. */
+const RAMP_LAUNCH_PROGRESS = 0.82;
+/** Launch vertical speed = base + perSpeed * forward speed (≈ 9 m/s → ~0.8 s air at top speed). */
+const RAMP_LAUNCH_VY_BASE = 6.2;
+const RAMP_LAUNCH_VY_PER_SPEED = 0.13;
+const RAMP_COOLDOWN = 0.8;
+/** A crest jump (no ramp) allows a trick only if the predicted total air time is at least this long. */
+const CREST_TRICK_MIN_AIR = 0.55;
+/** ...and at least this much air time remains when the trick is pressed. */
+const TRICK_MIN_REMAINING = 0.2;
+/** Visual trick flourish duration (s). */
+const TRICK_VIS_DURATION = 0.48;
+/** Pivot height (m) of the trick rotation (≈ body centre) so the kart spins in place. */
+const TRICK_PIVOT_Y = 0.45;
+const BURNOUT_DURATION = 0.9;
+const SPEED_SCALE_MIN = 0.4;
+const SPEED_SCALE_MAX = 1.6;
 
 // --- scratch (no per-step allocations) ---------------------------------------
 const UP = new THREE.Vector3(0, 1, 0);
@@ -78,6 +103,8 @@ const _qYaw = new THREE.Quaternion();
 const _qTilt = new THREE.Quaternion();
 const _euler = new THREE.Euler();
 const _color = new THREE.Color();
+const _pivot = new THREE.Vector3();
+const _qVis = new THREE.Quaternion();
 const _query: SurfaceQuery = {
   t: 0,
   surface: 'road',
@@ -89,6 +116,7 @@ const _query: SurfaceQuery = {
   tangent: new THREE.Vector3(0, 0, -1),
   binormal: new THREE.Vector3(1, 0, 0),
   center: new THREE.Vector3(),
+  ramp: -1,
 };
 
 function approachZero(v: number, step: number): number {
@@ -123,6 +151,13 @@ export class Kart implements IKart {
   private readonly collisionCooldown = new Float32Array(32);
   private frozenThrottleTime = 0;
   private disposed = false;
+  // Kart Party
+  private speedScale = 1;
+  private rampCooldown = 0;
+  private fromRamp = false;
+  private trickDir: -1 | 1 = 1;
+  private trickFlip = false;
+  private burnoutTimer = 0;
 
   // --- visual internals --------------------------------------------------------
   private time = 0;
@@ -142,6 +177,10 @@ export class Kart implements IKart {
   private pendingHop = false;
   private starVisualActive = false;
   private accentStage = -1;
+  private pendingTrickVis = false;
+  private visTrickTime = -1;
+  private visTrickDir = 1;
+  private visTrickFlip = false;
 
   constructor(id: number, character: CharacterDef, isPlayer: boolean) {
     this.state = {
@@ -186,6 +225,10 @@ export class Kart implements IKart {
       itemRouletteActive: false,
       surface: 'road',
       wheelSpin: 0,
+      trickReady: false,
+      isTricking: false,
+      isBurningOut: false,
+      speedScale: 1,
     };
     this.parts = buildKartModel(character);
     this.visual = this.parts.root;
@@ -294,7 +337,7 @@ export class Kart implements IKart {
 
     // Wheels.
     const wheelRadius = p.wheelRadii[0] || 0.2;
-    s.wheelSpin += (s.speed / wheelRadius) * dt;
+    s.wheelSpin += ((s.isBurningOut ? 38 * wheelRadius : s.speed) / wheelRadius) * dt;
     if (s.wheelSpin > TAU) s.wheelSpin -= TAU;
     else if (s.wheelSpin < 0) s.wheelSpin += TAU;
     const wheels = p.wheels;
@@ -324,6 +367,30 @@ export class Kart implements IKart {
       spinHop = Math.sin(prog * Math.PI) * 0.22;
     }
 
+    // Trick flourish (barrel roll or flip around the body centre), started by a mid-air trick.
+    if (this.pendingTrickVis) {
+      this.pendingTrickVis = false;
+      this.visTrickTime = 0;
+      this.visTrickDir = this.trickDir;
+      this.visTrickFlip = this.trickFlip;
+    }
+    let trickRoll = 0;
+    let trickPitch = 0;
+    let trickLift = 0;
+    if (this.visTrickTime >= 0) {
+      if (s.isSpinning) {
+        this.visTrickTime = -1;
+      } else {
+        this.visTrickTime += dt;
+        const prog = clamp01(this.visTrickTime / TRICK_VIS_DURATION);
+        const e = prog * prog * (3 - 2 * prog);
+        if (this.visTrickFlip) trickPitch = -e * TAU;
+        else trickRoll = e * TAU * this.visTrickDir;
+        trickLift = Math.sin(prog * Math.PI) * 0.35;
+        if (prog >= 1) this.visTrickTime = -1;
+      }
+    }
+
     // Squash & stretch spring (hop / landing).
     if (this.pendingHop) {
       this.visSquashVel += 2.2;
@@ -345,9 +412,15 @@ export class Kart implements IKart {
 
     const v = this.visual;
     v.scale.set(sxz * squishXZ * this.visShrink, sy * this.visSquishY * this.visShrink, sxz * squishXZ * this.visShrink);
-    v.position.y = spinHop;
-    _euler.set(this.visPitch, this.visYawOffset + spinYaw, this.visRoll, 'YXZ');
+    _euler.set(this.visPitch + trickPitch, this.visYawOffset + spinYaw, this.visRoll + trickRoll, 'YXZ');
     v.quaternion.setFromEuler(_euler);
+    if (trickRoll !== 0 || trickPitch !== 0) {
+      // Rotate about the body centre instead of the model origin (ground contact point).
+      _pivot.set(0, TRICK_PIVOT_Y, 0).applyQuaternion(_qVis.copy(v.quaternion));
+      v.position.set(-_pivot.x, TRICK_PIVOT_Y - _pivot.y + spinHop + trickLift, -_pivot.z);
+    } else {
+      v.position.set(0, spinHop, 0);
+    }
 
     // Driver: look into the turn, lean with steering and acceleration.
     const lookTarget = -s.steerVisual * 0.5 - (s.isDrifting ? s.driftDirection * 0.35 : 0);
@@ -409,6 +482,10 @@ export class Kart implements IKart {
   applyHit(cause: ItemType | 'collision' | 'explosion', sourceKartId: number): boolean {
     const s = this.state;
     if (s.isInvincible || s.isSpinning) return false;
+    // Getting hit cancels a trick (no landing boost) and any burnout.
+    s.isTricking = false;
+    s.trickReady = false;
+    this.fromRamp = false;
     s.isSpinning = true;
     s.spinTimer = SPIN_DURATION;
     if (s.isDrifting) this.endDrift(false);
@@ -468,6 +545,31 @@ export class Kart implements IKart {
     if (impulse.y > 0.5 && !s.isAirborne) this.freeY = s.position.y + 0.01;
   }
 
+  /**
+   * Kart Party: cc-class multiplier for top speed and acceleration (50cc 0.8, 100cc 0.92,
+   * 150cc 1.0). Everything relative to top speed (boosts, drift thresholds, AI) follows.
+   */
+  setSpeedScale(scale: number): void {
+    const v = Number.isFinite(scale) ? clamp(scale, SPEED_SCALE_MIN, SPEED_SCALE_MAX) : 1;
+    this.speedScale = v;
+    this.state.speedScale = v;
+  }
+
+  /**
+   * Kart Party: too-early start. The wheels spin in place for ~0.9 s (no traction, smoke) and
+   * any pending start boost is cancelled. Call right after `setFrozen(false)` at GO.
+   */
+  applyBurnout(): void {
+    const s = this.state;
+    if (this.disposed) return;
+    s.isBoosting = false;
+    s.boostTimer = 0;
+    s.boostStrength = 0;
+    this.burnoutTimer = BURNOUT_DURATION;
+    s.isBurningOut = true;
+    events.emit('kart:burnout', { kartId: s.id });
+  }
+
   setFrozen(frozen: boolean): void {
     const s = this.state;
     if (s.isFrozen && !frozen) {
@@ -514,6 +616,14 @@ export class Kart implements IKart {
     s.isSpinning = false;
     s.spinTimer = 0;
     s.steerVisual = 0;
+    s.trickReady = false;
+    s.isTricking = false;
+    s.isBurningOut = false;
+    this.burnoutTimer = 0;
+    this.fromRamp = false;
+    this.rampCooldown = 0.5;
+    this.visTrickTime = -1;
+    this.pendingTrickVis = false;
     this.padCooldown = 0.5;
     this.wallCooldown = 0;
     this.visYawOffset = 0;
@@ -558,7 +668,7 @@ export class Kart implements IKart {
   // ===========================================================================
 
   private baseTopSpeed(): number {
-    return BASE_TOP_SPEED * (0.93 + 0.14 * this.state.character.stats.speed);
+    return BASE_TOP_SPEED * (0.93 + 0.14 * this.state.character.stats.speed) * this.speedScale;
   }
 
   private tickTimers(dt: number): void {
@@ -602,6 +712,14 @@ export class Kart implements IKart {
       }
     }
     if (this.padCooldown > 0) this.padCooldown -= dt;
+    if (this.rampCooldown > 0) this.rampCooldown -= dt;
+    if (this.burnoutTimer > 0) {
+      this.burnoutTimer -= dt;
+      if (this.burnoutTimer <= 0) {
+        this.burnoutTimer = 0;
+        s.isBurningOut = false;
+      }
+    }
     if (this.wallCooldown > 0) this.wallCooldown -= dt;
     const cc = this.collisionCooldown;
     for (let i = 0; i < cc.length; i++) if (cc[i] > 0) cc[i] -= dt;
@@ -648,7 +766,14 @@ export class Kart implements IKart {
       return;
     }
 
-    const maxAccel = ACCEL_BASE * (0.5 + s.character.stats.acceleration);
+    if (this.burnoutTimer > 0) {
+      // Wheelspin stall: no traction, the kart barely creeps forward.
+      speed = speed > 1.2 ? approachZero(speed, 12 * dt) : Math.min(1.2, speed + 1.5 * dt * inp.throttle);
+      s.speed = speed;
+      return;
+    }
+
+    const maxAccel = ACCEL_BASE * (0.5 + s.character.stats.acceleration) * this.speedScale;
     const throttle = s.isBoosting ? 1 : inp.throttle;
     const brake = inp.brake;
 
@@ -696,6 +821,8 @@ export class Kart implements IKart {
 
     if (driftPressed && !s.isAirborne && Math.abs(s.speed) > 0.3 * base) {
       this.hop();
+    } else if (driftPressed && s.isAirborne && s.trickReady) {
+      this.startTrick();
     }
 
     if (!s.isDrifting && driftHeld && s.isHopping && this.hopTimer >= HOP_DRIFT_DELAY) {
@@ -741,6 +868,35 @@ export class Kart implements IKart {
     this.freeY = s.position.y + 0.001;
     this.pendingHop = true;
     events.emit('kart:hop', { kartId: s.id });
+  }
+
+  private startTrick(): void {
+    const s = this.state;
+    s.isTricking = true;
+    s.trickReady = false;
+    const steer = this.input.steer;
+    this.trickFlip = Math.abs(steer) < 0.35;
+    this.trickDir = steer > 0.1 ? -1 : steer < -0.1 ? 1 : (s.id & 1) === 0 ? 1 : -1;
+    this.pendingTrickVis = true;
+    this.pendingHop = true;
+    events.emit('kart:trick', { kartId: s.id });
+  }
+
+  private launchFromRamp(): void {
+    const s = this.state;
+    const fwd = Math.max(0, s.speed);
+    const vy = RAMP_LAUNCH_VY_BASE + RAMP_LAUNCH_VY_PER_SPEED * fwd;
+    this.vy = Math.max(this.vy, vy);
+    this.freeY = s.position.y + 0.02;
+    s.position.y = this.freeY;
+    s.isAirborne = true;
+    s.isHopping = false;
+    s.airTime = 0;
+    this.fromRamp = true;
+    s.isTricking = false;
+    this.rampCooldown = RAMP_COOLDOWN;
+    this.pendingHop = true;
+    events.emit('kart:ramp', { kartId: s.id, speed: fwd });
   }
 
   private tryStartDrift(): void {
@@ -888,6 +1044,33 @@ export class Kart implements IKart {
       }
     }
 
+    // --- jump ramps (Kart Party) -----------------------------------------------------
+    const ramp = q.ramp ?? -1;
+    if (
+      ramp >= RAMP_LAUNCH_PROGRESS &&
+      !isVoid &&
+      !s.isFrozen &&
+      this.rampCooldown <= 0 &&
+      s.speed > JUMP_RAMP_MIN_SPEED * this.speedScale &&
+      s.position.y - q.groundY < 0.7
+    ) {
+      this.launchFromRamp();
+    }
+
+    // Trick availability: airborne off a ramp, or a crest jump with enough predicted air time.
+    if (s.isAirborne && !s.isHopping && !s.isSpinning && !s.isTricking && !isVoid && !s.isFrozen) {
+      if (this.fromRamp) {
+        s.trickReady = s.airTime < 2;
+      } else {
+        const h = Math.max(0, this.freeY - q.groundY);
+        const v = this.vy;
+        const remaining = (v + Math.sqrt(Math.max(0, v * v + 2 * GRAVITY * h))) / GRAVITY;
+        s.trickReady = s.airTime >= 0.06 && remaining >= TRICK_MIN_REMAINING && s.airTime + remaining >= CREST_TRICK_MIN_AIR;
+      }
+    } else {
+      s.trickReady = false;
+    }
+
     s.velocity.y = this.vy;
 
     // --- ground normal (smoothed) ---------------------------------------------
@@ -903,6 +1086,11 @@ export class Kart implements IKart {
   private land(impact: number): void {
     const s = this.state;
     const wasHopping = s.isHopping;
+    const tricked = s.isTricking === true;
+    s.isTricking = false;
+    s.trickReady = false;
+    this.fromRamp = false;
+    if (tricked && !s.isSpinning) this.applyBoost(TRICK_BOOST_STRENGTH, TRICK_BOOST_DURATION, 'trick');
     if (impact > 9) s.speed *= 0.9;
     this.pendingLandImpact = impact;
     if (impact > 0.5 || s.airTime > 0.12) {

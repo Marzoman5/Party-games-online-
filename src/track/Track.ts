@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Checkpoint, ITrack, MinimapData, StartSlot, SurfaceQuery, SurfaceType, TrackDefinition, TrackSample } from '../core/types';
+import type { Checkpoint, ITrack, JumpRampInfo, MinimapData, StartSlot, SurfaceQuery, SurfaceType, TrackDefinition, TrackSample } from '../core/types';
 import { CHECKPOINT_COUNT, ITEM_BOX_ROW_SIZE, KART_COUNT } from '../core/constants';
 import { lerp, seededRandom, smoothstep, trackDelta, wrap01 } from '../core/math';
 import { Centerline } from './Centerline';
@@ -13,6 +13,7 @@ import { buildDecorations } from './builders/decor';
 import { BOOST_PAD_LENGTH, buildBoostPads, buildGantry, buildGrandstands, buildSponsorBridges, computeItemBoxPositions, type BoostPadInfo } from './builders/props';
 import { buildAnimatedProps } from './builders/animated';
 import { buildLandmarks } from './builders/landmarks';
+import { buildJumpRamps, computeJumpRamps } from './builders/ramps';
 
 /** Half length (metres) of the 'boost' surface strip centred on each boost pad t (= the visible strip). */
 const BOOST_PAD_HALF_LENGTH = BOOST_PAD_LENGTH / 2;
@@ -44,6 +45,7 @@ export function createSurfaceQuery(): SurfaceQuery {
     tangent: new THREE.Vector3(0, 0, -1),
     binormal: new THREE.Vector3(1, 0, 0),
     center: new THREE.Vector3(),
+    ramp: -1,
   };
 }
 
@@ -73,8 +75,14 @@ export class Track implements ITrack {
   readonly itemBoxPositions: readonly THREE.Vector3[];
   readonly boostPads: readonly BoostPadInfo[];
   readonly minimap: MinimapData;
+  readonly jumpRamps: readonly JumpRampInfo[];
 
   private readonly cl: Centerline;
+  /** Flat copies of ramp data for the allocation-free query hot path. */
+  private readonly rampT: Float64Array;
+  private readonly rampHalfWidth: Float64Array;
+  private readonly rampLength: Float64Array;
+  private readonly rampHeight: Float64Array;
   private readonly field: TerrainField;
   private readonly updaters: Updater[] = [];
   private readonly disposables: { dispose(): void }[] = [];
@@ -83,6 +91,12 @@ export class Track implements ITrack {
   /** Lateral half extent of each pad's visible strip (same order as boostPadTs). */
   private readonly boostPadHalfWidths: Float64Array;
   private disposed = false;
+  /** setDetail bookkeeping: instanced decoration with its full instance count / shadow flag. */
+  private readonly detailMeshes: { mesh: THREE.InstancedMesh; full: number; shadow: boolean; decor: boolean }[] = [];
+  private detailTier: 0 | 1 | 2 | 3 = 3;
+  private tyreMesh: THREE.InstancedMesh | null = null;
+  private tyreFullGeo: THREE.BufferGeometry | null = null;
+  private tyreLowGeo: THREE.BufferGeometry | null = null;
 
   constructor(def: TrackDefinition) {
     this.def = def;
@@ -106,6 +120,19 @@ export class Track implements ITrack {
     this.startGrid = this.buildStartGrid();
     this.itemBoxPositions = computeItemBoxPositions(ctx, ITEM_BOX_ROW_SIZE);
     this.minimap = this.buildMinimap();
+    this.jumpRamps = computeJumpRamps(ctx);
+    const nr = this.jumpRamps.length;
+    this.rampT = new Float64Array(nr);
+    this.rampHalfWidth = new Float64Array(nr);
+    this.rampLength = new Float64Array(nr);
+    this.rampHeight = new Float64Array(nr);
+    for (let i = 0; i < nr; i++) {
+      const r = this.jumpRamps[i];
+      this.rampT[i] = r.t;
+      this.rampHalfWidth[i] = r.halfWidth;
+      this.rampLength[i] = r.length;
+      this.rampHeight[i] = r.height;
+    }
 
     // ------------------------------------------------------------ geometry
     const root = new THREE.Group();
@@ -126,8 +153,64 @@ export class Track implements ITrack {
     this.boostPads = pads;
     this.boostPadHalfWidths = new Float64Array(this.boostPadTs.length);
     for (let i = 0; i < pads.length && i < this.boostPadHalfWidths.length; i++) this.boostPadHalfWidths[i] = pads[i].halfWidth;
+    const rampGroup = buildJumpRamps(ctx, this.jumpRamps);
+    if (rampGroup) root.add(rampGroup);
     root.add(buildAnimatedProps(ctx));
     this.object = root;
+    this.collectDetailMeshes();
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Detail level (Kart Party perf knob)
+  // ---------------------------------------------------------------------------------------
+
+  private collectDetailMeshes(): void {
+    this.object.traverse((o) => {
+      const m = o as THREE.InstancedMesh;
+      if (!m.isInstancedMesh) return;
+      if (m.name === 'crowd' || m.name === 'grandstandCrowd') return;
+      const barrier = /Barriers$|Posts$|Rail$/.test(m.name);
+      this.detailMeshes.push({ mesh: m, full: m.count, shadow: m.castShadow, decor: !barrier });
+      if (m.name === 'tyreBarriers') {
+        this.tyreMesh = m;
+        this.tyreFullGeo = m.geometry;
+      }
+    });
+  }
+
+  /**
+   * Decoration detail: 3 = full (default), 2 = 75 % decor instances, 1 = 50 % decor + no decor
+   * shadows + low-poly tyre stacks, 0 = 30 % decor and no instanced shadows at all. Gameplay
+   * geometry (road, walls, ramps, pads) is never touched. Cheap; safe to call any time.
+   */
+  setDetail(tier: 0 | 1 | 2 | 3): void {
+    if (this.disposed) return;
+    const t = (tier < 0 ? 0 : tier > 3 ? 3 : Math.round(tier)) as 0 | 1 | 2 | 3;
+    if (t === this.detailTier) return;
+    this.detailTier = t;
+    const frac = t === 3 ? 1 : t === 2 ? 0.75 : t === 1 ? 0.5 : 0.3;
+    for (const d of this.detailMeshes) {
+      if (d.decor) {
+        d.mesh.count = Math.max(0, Math.min(d.full, Math.round(d.full * frac)));
+        d.mesh.castShadow = d.shadow && t >= 2;
+      } else {
+        d.mesh.castShadow = d.shadow && t >= 1;
+      }
+    }
+    if (this.tyreMesh && this.tyreFullGeo) {
+      if (t <= 1) {
+        if (!this.tyreLowGeo) {
+          // 8-sided stack (64 tris) instead of three tori (192 tris), same footprint.
+          const g = new THREE.CylinderGeometry(0.46, 0.47, 0.88, 8, 1, false);
+          g.translate(0, 0.44, 0);
+          this.tyreLowGeo = g;
+          this.disposables.push(g);
+        }
+        this.tyreMesh.geometry = this.tyreLowGeo;
+      } else {
+        this.tyreMesh.geometry = this.tyreFullGeo;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------------------
@@ -183,6 +266,26 @@ export class Track implements ITrack {
       const nx = (hx0 - hx1) / (2 * e);
       const nz = (hz0 - hz1) / (2 * e);
       q.groundNormal.set(lerp(_qs.normal.x, nx, k), lerp(_qs.normal.y, 1, k), lerp(_qs.normal.z, nz, k)).normalize();
+    }
+
+    // Jump ramps: the kicker raises the ground linearly from its start to the lip.
+    q.ramp = -1;
+    const nr = this.rampT.length;
+    if (nr > 0 && a <= hw) {
+      const len = this.length;
+      for (let i = 0; i < nr; i++) {
+        if (a > this.rampHalfWidth[i]) continue;
+        const d = trackDelta(this.rampT[i], t) * len;
+        const L = this.rampLength[i];
+        if (d < 0 || d > L) continue;
+        const k = d / L;
+        const slope = this.rampHeight[i] / L;
+        q.groundY = roadY + this.rampHeight[i] * k;
+        const tg = _qs.tangent;
+        q.groundNormal.set(_qs.normal.x - tg.x * slope, _qs.normal.y - tg.y * slope, _qs.normal.z - tg.z * slope).normalize();
+        q.ramp = k;
+        break;
+      }
     }
     return q;
   }

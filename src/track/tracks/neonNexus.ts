@@ -46,6 +46,7 @@ export const neonNexus: TrackDefinition = {
   wallHalfWidthFactor: 1.4,
   itemBoxRows: [0.09, 0.4, 0.56, 0.8],
   boostPads: [0.175, 0.52, 0.75],
+  jumpRamps: [0.49, 0.96],
   environment: {
     skyTop: 0x02020c,
     skyHorizon: 0x6b1a9c,

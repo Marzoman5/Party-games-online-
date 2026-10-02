@@ -44,6 +44,7 @@ export const duneDrift: TrackDefinition = {
   wallHalfWidthFactor: 1.3,
   itemBoxRows: [0.12, 0.42, 0.62, 0.86],
   boostPads: [0.255, 0.55, 0.88],
+  jumpRamps: [0.015, 0.575],
   environment: {
     skyTop: 0x2b3a80,
     skyHorizon: 0xff9a5c,

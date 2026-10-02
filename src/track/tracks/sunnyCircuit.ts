@@ -45,6 +45,7 @@ export const sunnyCircuit: TrackDefinition = {
   wallHalfWidthFactor: 1.55,
   itemBoxRows: [0.1, 0.4, 0.62, 0.83],
   boostPads: [0.3, 0.7, 0.95],
+  jumpRamps: [0.035, 0.425],
   environment: {
     skyTop: 0x2f6fd8,
     skyHorizon: 0x9fd3ff,

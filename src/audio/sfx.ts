@@ -23,6 +23,12 @@ export class ListenerFrame {
 
 /** Approximate track length used to turn track-t distances into metres. */
 const TRACK_LENGTH_GUESS = 1100;
+/**
+ * "Player-only" sounds (roulette ticks, lap bell, position change...) for a human kart that is
+ * not the listener kart: played centred but quieter so 4 humans do not become a cacophony.
+ */
+const OTHER_HUMAN_GAIN = 0.3;
+const MAX_KART_SLOTS = 16;
 
 // ---------------------------------------------------------------------------
 // Crowd ambience
@@ -130,8 +136,9 @@ export class SfxBank {
   private readonly ctx: AudioContext;
   private readonly buses: SfxBuses;
   private readonly unsubs: (() => void)[] = [];
-  private rouletteCount = 0;
-  private lastWrongWay = -10;
+  private readonly rouletteCount = new Uint8Array(MAX_KART_SLOTS);
+  private readonly lastWrongWay = new Float64Array(MAX_KART_SLOTS).fill(-10);
+  private lastOtherPositionChange = -10;
   private disposed = false;
 
   constructor(ctx: AudioContext, buses: SfxBuses) {
@@ -153,11 +160,14 @@ export class SfxBank {
     u.push(events.on('kart:squish', (e) => this.squish(e.kartId)));
     u.push(events.on('kart:shrink', (e) => this.shrink(e.kartId, true)));
     u.push(events.on('kart:unshrink', (e) => this.shrink(e.kartId, false)));
-    u.push(events.on('item:pickup', (e) => this.itemPickup(e.position, e.isPlayer)));
-    u.push(events.on('item:rouletteTick', (e) => this.rouletteTick(e.isPlayer)));
-    u.push(events.on('item:rouletteEnd', (e) => this.rouletteEnd(e.isPlayer)));
-    u.push(events.on('item:use', (e) => this.itemUse(e.item, e.position, e.isPlayer)));
-    u.push(events.on('item:hit', (e) => this.itemHit(e.item, e.position, e.isPlayer)));
+    u.push(events.on('item:pickup', (e) => this.itemPickup(e.position, this.isPlayer(e.kartId))));
+    u.push(events.on('item:rouletteTick', (e) => this.rouletteTick(e.kartId, e.isPlayer)));
+    u.push(events.on('item:rouletteEnd', (e) => this.rouletteEnd(e.kartId, e.isPlayer)));
+    u.push(events.on('item:use', (e) => this.itemUse(e.item, e.position, this.isPlayer(e.kartId))));
+    u.push(events.on('item:hit', (e) => this.itemHit(e.item, e.position, this.isPlayer(e.kartId))));
+    u.push(events.on('kart:ramp', (e) => this.ramp(e.kartId, e.speed)));
+    u.push(events.on('kart:trick', (e) => this.trick(e.kartId)));
+    u.push(events.on('kart:burnout', (e) => this.burnout(e.kartId)));
     u.push(events.on('item:destroyed', (e) => this.itemDestroyed(e.item, e.position)));
     u.push(events.on('item:shellBounce', (e) => this.shellBounce(e.position)));
     u.push(events.on('item:explosion', (e) => this.explosion(e.position, e.radius)));
@@ -168,7 +178,7 @@ export class SfxBank {
     u.push(events.on('race:start', () => this.raceStart()));
     u.push(events.on('race:lap', (e) => this.lap(e.kartId, e.isPlayer, e.isFinalLap)));
     u.push(events.on('race:finish', (e) => this.finish(e.kartId, e.place, e.isPlayer)));
-    u.push(events.on('race:positionChange', (e) => { if (e.isPlayer) this.positionChange(e.from, e.to); }));
+    u.push(events.on('race:positionChange', (e) => { if (e.isPlayer) this.positionChange(e.kartId, e.from, e.to); }));
     u.push(events.on('race:wrongWay', (e) => this.wrongWay(e.kartId, e.wrongWay)));
     u.push(events.on('ui:move', () => this.uiMove()));
     u.push(events.on('ui:select', () => this.uiSelect()));
@@ -194,8 +204,22 @@ export class SfxBank {
     return null;
   }
 
+  /** True for the listener kart (the one the camera/audio follows). */
   private isPlayer(kartId: number): boolean {
     return kartId === this.playerKartId;
+  }
+
+  /**
+   * Gain for a "player-only" (HUD-like) sound of `kartId`: 1 for the listener kart, reduced for
+   * other human karts, 0 for AI. `humanHint` is the event's own isPlayer flag.
+   */
+  private humanGain(kartId: number, humanHint: boolean): number {
+    if (this.isPlayer(kartId)) return 1;
+    return humanHint ? OTHER_HUMAN_GAIN : 0;
+  }
+
+  private slot(kartId: number): number {
+    return ((kartId % MAX_KART_SLOTS) + MAX_KART_SLOTS) % MAX_KART_SLOTS;
   }
 
   /**
@@ -353,6 +377,12 @@ export class SfxBank {
       filter: { type: 'lowpass', freq: 2000 },
       env: { attack: 0.02, decay: 0.15, sustain: 0.5, release: 0.1 },
     });
+    if (source === 'trick') {
+      playTone(ctx, dest, {
+        freq: 1568, endFreq: 2093, type: 'sine', duration: 0.14, gain: 0.07 * s, when: now + 0.02,
+        env: { attack: 0.003, decay: 0.1, sustain: 0.2, release: 0.1 },
+      });
+    }
     if (source === 'pad' || source === 'start') {
       playTone(ctx, dest, {
         freq: 1320, endFreq: 1760, type: 'sine', duration: 0.12, gain: 0.08 * s, when: now + 0.03,
@@ -495,11 +525,15 @@ export class SfxBank {
     playTone(ctx, dest, { freq: 3136, type: 'sine', duration: 0.08, gain: 0.05, when: now + 0.08, env: { attack: 0.002, decay: 0.06, sustain: 0.1, release: 0.06 } });
   }
 
-  rouletteTick(isPlayer: boolean): void {
-    if (!isPlayer || this.disposed) return;
-    this.rouletteCount++;
-    const dest = this.buses.sfx;
-    const f = 900 * (1 + 0.035 * this.rouletteCount);
+  rouletteTick(kartId: number, isPlayer: boolean): void {
+    const g = this.humanGain(kartId, isPlayer);
+    if (g <= 0 || this.disposed) return;
+    const slot = this.slot(kartId);
+    this.rouletteCount[slot] = Math.min(255, this.rouletteCount[slot] + 1);
+    const dest = this.spatial(null, 1, 1, g);
+    if (!dest) return;
+    // Other humans' roulettes sit a fifth lower so simultaneous spins stay distinguishable.
+    const f = 900 * (1 + 0.035 * this.rouletteCount[slot]) * (g < 1 ? 0.75 : 1);
     playNoiseBurst(this.ctx, dest, {
       duration: 0.015, gain: 0.1,
       filter: { type: 'highpass', freq: 3000 },
@@ -511,10 +545,12 @@ export class SfxBank {
     });
   }
 
-  rouletteEnd(isPlayer: boolean): void {
-    this.rouletteCount = 0;
-    if (!isPlayer || this.disposed) return;
-    const dest = this.buses.sfx;
+  rouletteEnd(kartId: number, isPlayer: boolean): void {
+    this.rouletteCount[this.slot(kartId)] = 0;
+    const g = this.humanGain(kartId, isPlayer);
+    if (g <= 0 || this.disposed) return;
+    const dest = this.spatial(null, 1, 1, g);
+    if (!dest) return;
     const now = this.now;
     playTone(this.ctx, dest, {
       freq: 1568, type: 'sine', duration: 0.25, gain: 0.18, when: now,
@@ -752,9 +788,10 @@ export class SfxBank {
   }
 
   lap(kartId: number, isPlayer: boolean, isFinalLap: boolean): void {
-    if (!isPlayer) return;
-    if (this.disposed) return;
-    const dest = this.buses.sfx;
+    const g = this.humanGain(kartId, isPlayer);
+    if (g <= 0 || this.disposed) return;
+    const dest = this.spatial(null, 1, 1, g);
+    if (!dest) return;
     const ctx = this.ctx;
     const now = this.now;
     const bell = (f: number, gain: number, when: number): void => {
@@ -763,7 +800,7 @@ export class SfxBank {
       playTone(ctx, dest, { freq: f * 2.76, type: 'sine', duration: 0.01, gain: gain * 0.22, when, env: { attack: 0.002, decay: 0.3, sustain: 0.001, release: 0.1 } });
     };
     bell(1568, 0.2, now);
-    if (isFinalLap) {
+    if (isFinalLap && g >= 1) {
       bell(2093, 0.16, now + 0.18);
       playSequence(ctx, dest, [[72, 0.12], [76, 0.12], [79, 0.12], [84, 0.45]], {
         type: 'square', gain: 0.1, when: now + 0.3,
@@ -782,10 +819,14 @@ export class SfxBank {
     if (this.disposed) return;
     const ctx = this.ctx;
     const now = this.now;
-    if (!isPlayer) {
-      const dest = this.spatial(this.kartPosition(kartId), 10, 60, 0.4);
+    if (!isPlayer || !this.isPlayer(kartId)) {
+      // AI (positional) or another human (short centred chime instead of the full fanfare).
+      const dest = isPlayer
+        ? this.spatial(null, 1, 1, OTHER_HUMAN_GAIN * 1.6)
+        : this.spatial(this.kartPosition(kartId), 10, 60, 0.4);
       if (!dest) return;
       playTone(ctx, dest, { freq: 1046, endFreq: 1568, type: 'sine', duration: 0.2, gain: 0.1, when: now, env: { attack: 0.005, decay: 0.15, sustain: 0.3, release: 0.1 } });
+      if (isPlayer) playTone(ctx, dest, { freq: 2093, type: 'sine', duration: 0.25, gain: 0.08, when: now + 0.16, env: { attack: 0.005, decay: 0.2, sustain: 0.2, release: 0.15 } });
       return;
     }
     const dest = this.buses.sfx;
@@ -813,14 +854,22 @@ export class SfxBank {
     }
   }
 
-  positionChange(from: number, to: number): void {
+  positionChange(kartId: number, from: number, to: number): void {
     if (this.disposed) return;
+    const listener = this.isPlayer(kartId);
+    if (!listener) {
+      // Other humans: quieter and rate-limited (4 humans swap places constantly).
+      if (this.now - this.lastOtherPositionChange < 0.35) return;
+      this.lastOtherPositionChange = this.now;
+    }
+    const dest = listener ? this.buses.sfx : this.spatial(null, 1, 1, OTHER_HUMAN_GAIN * 0.8);
+    if (!dest) return;
     const gained = to < from;
-    playTone(this.ctx, this.buses.sfx, {
+    playTone(this.ctx, dest, {
       freq: gained ? 600 : 1200, endFreq: gained ? 1200 : 600, type: 'sine', duration: 0.12, gain: 0.11,
       env: { attack: 0.005, decay: 0.08, sustain: 0.4, release: 0.08 },
     });
-    playNoiseBurst(this.ctx, this.buses.sfx, {
+    playNoiseBurst(this.ctx, dest, {
       duration: 0.12, gain: 0.06,
       filter: { type: 'bandpass', freq: gained ? 1200 : 2400, endFreq: gained ? 2400 : 1200, q: 1.5 },
       env: { attack: 0.01, decay: 0.08, sustain: 0.3, release: 0.06 },
@@ -828,15 +877,92 @@ export class SfxBank {
   }
 
   wrongWay(kartId: number, wrongWay: boolean): void {
-    if (!wrongWay || !this.isPlayer(kartId) || this.disposed) return;
+    if (!wrongWay || this.disposed) return;
+    const human = this.isPlayer(kartId) || this.isHumanKart(kartId);
+    if (!human) return;
     const now = this.now;
-    if (now - this.lastWrongWay < 1.0) return;
-    this.lastWrongWay = now;
-    playTone(this.ctx, this.buses.sfx, {
+    const slot = this.slot(kartId);
+    if (now - this.lastWrongWay[slot] < 1.0) return;
+    this.lastWrongWay[slot] = now;
+    const dest = this.spatial(null, 1, 1, this.isPlayer(kartId) ? 1 : OTHER_HUMAN_GAIN);
+    if (!dest) return;
+    playTone(this.ctx, dest, {
       freq: 110, type: 'square', duration: 0.25, gain: 0.11,
       filter: { type: 'lowpass', freq: 700 },
       env: { attack: 0.005, decay: 0.05, sustain: 0.8, release: 0.05 },
     });
+  }
+
+  private isHumanKart(kartId: number): boolean {
+    const karts = this.karts;
+    for (let i = 0; i < karts.length; i++) if (karts[i].state.id === kartId) return karts[i].state.isPlayer;
+    return false;
+  }
+
+  // -------------------------------------------------------------------------
+  // Kart Party: ramps, tricks, burnout
+  // -------------------------------------------------------------------------
+
+  /** Ramp launch: springy "thwump" + rising air whoosh. */
+  ramp(kartId: number, speed: number): void {
+    const dest = this.kartDest(kartId, 10, 50, 1, 0.55);
+    if (!dest) return;
+    const ctx = this.ctx;
+    const now = this.now;
+    const s = 0.7 + 0.3 * clamp01(speed / 25);
+    playTone(ctx, dest, {
+      freq: 120, endFreq: 260, sweepTime: 0.12, type: 'triangle', duration: 0.16, gain: 0.22 * s, when: now,
+      env: { attack: 0.003, decay: 0.1, sustain: 0.3, release: 0.06 },
+    });
+    playNoiseBurst(ctx, dest, {
+      duration: 0.4, gain: 0.16 * s, when: now + 0.02,
+      filter: { type: 'bandpass', freq: 500, endFreq: 2200, q: 0.9 },
+      env: { attack: 0.03, decay: 0.25, sustain: 0.3, release: 0.12 },
+    });
+  }
+
+  /** Trick: quick rising sparkle arpeggio + whoosh ("ta-da!"). */
+  trick(kartId: number): void {
+    const dest = this.kartDest(kartId, 10, 50, 1, 0.5);
+    if (!dest) return;
+    const ctx = this.ctx;
+    const now = this.now;
+    playNoiseBurst(ctx, dest, {
+      duration: 0.28, gain: 0.14, when: now,
+      filter: { type: 'bandpass', freq: 900, endFreq: 3200, q: 1.2 },
+      env: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.08 },
+    });
+    const notes = [76, 81, 84, 88];
+    for (let k = 0; k < notes.length; k++) {
+      playTone(ctx, dest, {
+        freq: midiToFreq(notes[k]), type: 'triangle', duration: 0.07, gain: 0.12, when: now + 0.035 * k,
+        env: { attack: 0.002, decay: 0.05, sustain: 0.35, release: 0.08 },
+      });
+    }
+    playTone(ctx, dest, {
+      freq: midiToFreq(100), type: 'sine', duration: 0.12, gain: 0.05, when: now + 0.15,
+      env: { attack: 0.002, decay: 0.1, sustain: 0.1, release: 0.1 },
+    });
+  }
+
+  /** Burnout: sputtering wheelspin screech. */
+  burnout(kartId: number): void {
+    const dest = this.kartDest(kartId, 8, 40, 1, 0.5);
+    if (!dest) return;
+    const ctx = this.ctx;
+    const now = this.now;
+    playNoiseBurst(ctx, dest, {
+      duration: 0.8, gain: 0.18, rate: 1.3, when: now,
+      filter: { type: 'bandpass', freq: 2200, endFreq: 1400, q: 2 },
+      env: { attack: 0.02, decay: 0.3, sustain: 0.6, release: 0.2 },
+    });
+    for (let k = 0; k < 4; k++) {
+      playTone(ctx, dest, {
+        freq: 70, endFreq: 45, type: 'square', duration: 0.07, gain: 0.08, when: now + k * 0.16,
+        filter: { type: 'lowpass', freq: 500 },
+        env: { attack: 0.003, decay: 0.05, sustain: 0.3, release: 0.04 },
+      });
+    }
   }
 
   // -------------------------------------------------------------------------

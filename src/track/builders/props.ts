@@ -550,7 +550,7 @@ function ribbonGeometry(verts: number[], uvs: number[], idx: number[], norms: nu
 }
 
 /**
- * Mario Kart style boost pads: a dark rounded strip (BOOST_PAD_LENGTH long, inside the road edge
+ * Arcade-style boost pads: a dark rounded strip (BOOST_PAD_LENGTH long, inside the road edge
  * lines) carrying three scrolling orange-to-yellow chevrons, plus a faint orange trail on the road
  * ahead of each pad. Three merged meshes for all pads.
  */

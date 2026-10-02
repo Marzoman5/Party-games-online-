@@ -1,6 +1,6 @@
 /**
  * ItemManager - item boxes, roulette, held/orbiting items, projectiles and
- * hazards (bananas, shells, bob-ombs) plus their collisions with karts.
+ * hazards (bananas, shells, bombs) plus their collisions with karts.
  *
  * Only talks to the rest of the game through the core interfaces and the event
  * bus. Runs inside the fixed-step loop (`update(dt)`).
@@ -105,7 +105,7 @@ interface BoxSlot {
 
 type WeightRow = Partial<Record<ItemType, number>>;
 
-/** Place-weighted item table (index = place - 1). Tuned to feel like Mario Kart. */
+/** Place-weighted item table (index = place - 1). Tuned for classic arcade kart racing. */
 const ITEM_TABLE: readonly WeightRow[] = [
   // 1st
   { banana: 35, green_shell: 35, triple_banana: 10, bob_omb: 5, red_shell: 15 },
