@@ -361,7 +361,21 @@ npm run typecheck   # host + phone + server + tests
 npm run build       # production build (dist/ + dist-server/)
 npm test            # builds, starts the server, runs the Playwright suite (headless Chromium)
 npm run bots -- --url http://localhost:3000 --n 4   # 4 simulated phones play against a real host
+npm run bots -- --url http://localhost:3000 --n 4 --game smash   # ...the Smash Party loop
+npx tsx src/games/smash/sim/dev/selftest.ts         # Smash simulation self-test (knockback, all moves, rules)
+npx tsx src/games/smash/sim/ai/dev/aiSoak.ts        # CPU-vs-CPU soak (match length, recovery, level ladder)
 ```
+
+**Smash Party coverage** (`tests/smash-*.spec.ts`, ~12 min): a deterministic **combat unit test**
+(knockback formula vs hand-computed values, then real hits in the simulation at several %: knockback and
+launch distance match the formula); hub QR + 4 bots joining once, leader picks Smash, phone layouts swap;
+character + stage select; tutorial (advances, mirrored on phones, skip) and the "try it" sandbox (bots hit
+the dummy); a stock match to completion (hits, % rising on phones, KOs, GAME!, results); time mode + 2v2;
+items spawn and are used (bomb, bat); pause/resume from a phone; disconnect → CPU → reclaim; Smash →
+Kart race → Smash with the same players and three rematches without errors or leaks; host at 1366×768 and
+3840×2160 and the real phone fighter UI at iPhone/Android landscape sizes. The Smash bot brain
+(`scripts/bots.ts`) moves, jumps, attacks, smashes, shields, grabs and recovers, using positions the tests
+read from `window.__smash`.
 
 The bot controller (`scripts/bots.ts`) opens N simulated phones over WebSocket and plays the whole
 loop (join, pick racers, ready, tutorial, setup, drive with steering/drift/items, next race;
@@ -375,6 +389,39 @@ Debug hooks: `window.__game` (engine), `window.__party` (host session), `window.
 ## Design decisions
 
 Judgment calls made while building (the brief said "decide, document, keep going"):
+
+**Party Hub**
+- The lobby *is* the hub: there is no separate game-picker screen. Kart Party is the default game.
+  Picking a game in the lobby switches immediately; picking it on setup/results switches and continues to
+  that game's tutorial (first time this session) or setup.
+- Both games share one character roster (the 8 Kart Party racers), so a player's pick carries across games.
+- The Smash engine loads lazily the first time it's picked (a separate WebGL canvas). If it fails to load,
+  a toast says so and the party stays on Kart Party. The kart engine is suspended (no rendering/audio)
+  while Smash is active, and vice versa.
+- The tutorial auto-plays the first time **each** game is started; the Smash "try it" sandbox runs once
+  per session after it (even if the tutorial was skipped). The sandbox ends when the leader presses START,
+  everyone taps *I'm ready* (+1.2 s), or the host presses Esc. Disconnected players count as ready.
+- Smash tutorial steps are 4.5 s (the first one 7 s); Kart's stay 6 × 3.8 s.
+- After a match the leader gets **Rematch / Change Settings / Switch Game / Lobby**; for Smash "Next" = Rematch.
+- A leader START pressed while a game engine is still loading is queued, not dropped.
+- Phones create their reconnect token before the first join, so a dropped first connection never leaves
+  a ghost "Player N (disconnected)" seat.
+
+**Smash Party**
+- CPU fill sets the *total* number of fighters (2–4); a lone human always gets at least one CPU opponent.
+  CPUs use characters nobody picked. In team mode CPUs join the smaller team.
+- Setup values from the phone are clamped (e.g. stocks 1–5, time 60–300 s rounded to 30 s, CPU level 1–9),
+  never rejected. The training stage can't be picked for matches.
+- A disconnected player's fighter is played by a level-5 CPU until the phone comes back.
+- KO credit goes to the last attacker within 5 s **or for as long as the victim is still tumbling** from
+  that hit; otherwise it's a self-destruct (−1 in time mode, nobody gets +1). "Falls" counts every lost stock.
+- Mashing while grabbed only makes the grabber throw sooner (no mash-out); those presses are discarded so
+  they don't fire a move after release.
+- The bat breaks after 4 swings; final blasts deal ~33–40 % and only launch hard on the last hit — fun,
+  not a guaranteed KO. The Party Orb is rare (~5 % of spawns, one at a time).
+- Announcer lines ("3, 2, 1, GO!", "GAME!") use the browser's built-in speech synthesis when available,
+  always backed by synth stingers (no voice samples).
+- Default setup: Skyline Summit, 3 stocks, items on (medium), hazards on, no CPUs, FFA.
 
 **Flow**
 - The how-to-play tutorial plays automatically the **first time the leader presses START** in a
@@ -426,6 +473,19 @@ Judgment calls made while building (the brief said "decide, document, keep going
 
 ## Known limitations
 
+**Party Hub / Smash Party**
+- Smash Party has no grab mash-out, no teching, no attack clanking and no stale-move decay.
+  Pixel Pop and Big Rig Rosa have rougher, less-tuned kits than the other six fighters.
+- Up-specials have generous reach, so recovering is easy (party-friendly, but less edge-guarding drama).
+  Level-9 projectile CPUs can feel spammy.
+- Fighter name tags overlap when fighters stand on top of each other; sideways limb motions read weakly from
+  the camera angle; the Neon Arena's underside is plain.
+- Headless test machines render Smash at only ~3–6 fps (software GPU); real laptops should hold 60 fps, but
+  if it stutters add `?quality=1` (or `0`) to the host URL.
+- The two games use separate WebGL contexts and AudioContexts (only the active one runs).
+
+**Kart Party / general**
+
 - **Real devices untested in this build environment.** Everything was tested in headless Chromium
   (desktop + iPhone/Android emulation). iOS Safari specifics (scroll/zoom blocking, motion
   permission, add-to-home-screen) were implemented carefully but not verified on a physical phone.
@@ -461,3 +521,9 @@ whose license texts are kept in `licenses/`:
 - **[turbo-kart-rally](https://github.com/bridge-mind/turbo-kart-rally)** (commit `c52aca3`) — ideas
   and logic ported to TypeScript: rocket start, ramp trick boosts, intro flyover, live demo race
   behind the title, `window.__game` debug hooks.
+
+**Smash Party** is original code written for this repo (simulation, CPU AI, fighters, stages, audio).
+The Smash-style knockback formula is a general game-design formula; hitbox/hurtbox/knockback design
+ideas were informed by reading [mega-mash-bros](https://github.com/kkysen/mega-mash-bros) (Apache-2.0) —
+no code was copied from it or from any GPL/unlicensed project. No Nintendo names, characters, sprites,
+sounds or stage likenesses are used.
