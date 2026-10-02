@@ -5,7 +5,7 @@ export function printBanner(s: RunningServer): void {
   const lines: string[] = [];
   const hostUrl = `http://localhost:${s.port}`;
   const phoneUrls = s.lanFound ? s.urls.map((u) => `${u}/play`) : [];
-  lines.push('', '  KART PARTY is running!', '');
+  lines.push('', '  PARTY HUB is running!  (Kart Party + Smash Party)', '');
   lines.push(`  1) Open on the TV/laptop:   ${hostUrl}`);
   if (phoneUrls.length) {
     lines.push(`  2) Phones join:             ${phoneUrls[0]}`);

@@ -40,7 +40,7 @@ export function loadOrCreateCert(dir: string, ips: string[]): CertPair {
   }
 
   const altNames = names.map((n) => (isIPv4(n) ? { type: 7, ip: n } : { type: 2, value: n }));
-  const pems = selfsigned.generate([{ name: 'commonName', value: 'Kart Party (local)' }], {
+  const pems = selfsigned.generate([{ name: 'commonName', value: 'Party Hub (local)' }], {
     days: DAYS,
     keySize: 2048,
     algorithm: 'sha256',

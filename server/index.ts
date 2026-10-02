@@ -1,5 +1,5 @@
 /**
- * Kart Party server entry (bundled to dist-server/server.mjs).
+ * Party Hub server entry (bundled to dist-server/server.mjs).
  *
  *   node dist-server/server.mjs [--port N] [--https] [--https-port N] [--host-ip X]
  *                               [--static DIR] [--quiet] [--no-open]
@@ -14,7 +14,7 @@ interface Cli extends ServerOptions {
 }
 
 function usage(): string {
-  return `Kart Party server
+  return `Party Hub server (Kart Party + Smash Party)
 
 Usage: node dist-server/server.mjs [options]
   --port N         HTTP port (default env PORT or ${DEFAULT_PORT}; tries the next ports if busy)
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   try {
     server = await startServer(cli);
   } catch (err) {
-    console.error(`\n  Kart Party could not start: ${err instanceof Error ? err.message : String(err)}\n`);
+    console.error(`\n  Party Hub could not start: ${err instanceof Error ? err.message : String(err)}\n`);
     console.error('  Is another copy already running? Try:  npm run serve -- --port 4000\n');
     process.exit(1);
   }
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   const stop = (): void => {
     if (stopping) process.exit(0); // second Ctrl+C: force
     stopping = true;
-    console.log('\nStopping Kart Party... bye!');
+    console.log('\nStopping Party Hub... bye!');
     const force = setTimeout(() => process.exit(0), 2000);
     force.unref();
     void server.close().then(() => process.exit(0));

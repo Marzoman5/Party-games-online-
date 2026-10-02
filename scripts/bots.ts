@@ -1,5 +1,6 @@
 /**
- * Bot phones for Kart Party: fake controllers that speak the real wire protocol.
+ * Bot phones for Party Hub (Kart Party + Smash Party): fake controllers that speak the real
+ * wire protocol.
  *
  * Library use (Node, e.g. Playwright tests):
  *   import { BotPhone } from '../scripts/bots';
@@ -16,14 +17,30 @@
  *     --track ID  track for the race (default: whatever the host proposes)
  *     --chaos     every ~15 s drop a random bot and reconnect it with its token
  *     --duration S  exit after S seconds
+ *     --game smash  play Smash Party instead: leader picks Smash, skips the tutorial, bots
+ *                   practise in the sandbox and tap "I'm ready", leader sets up a stock match
+ *                   (--stocks N, --stage ID, --teams, --cpus N), bots fight with a blind brain,
+ *                   leader picks Rematch after each match.
+ *
+ * Smash Party (library):
+ *   bot.game('smash'); bot.gsetup({ stageId: 'arena', stocks: 2 }); bot.team(1); bot.practiceDone();
+ *   bot.startFightLoop();                       // 60 Hz fight packets ([1, seq, x, y, buttons, ...])
+ *   bot.setFightInput({ x: 1 });                // walk right
+ *   bot.press('attack');                        // +1 press counter, held bit, sent at once, released later
+ *   bot.flickAttack('right');                   // smash attack
+ *   bot.startSmashBrain(); bot.observe(view);   // AI that plays (feed it __smash.getState() at 5–10 Hz)
  */
 import { pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
 import {
   PROTOCOL_VERSION,
   WS_PATH,
+  encodeFightInput,
   encodeInput,
+  type DecodedFightInput,
   type DecodedInput,
+  type GameId,
+  type PhoneFightStatus,
   type PhoneFx,
   type PhoneRaceStatus,
   type PhoneState,
@@ -31,9 +48,47 @@ import {
   type RaceSetup,
   type ScreenId,
   type ServerError,
+  type SmashSetup,
 } from '../src/net/protocol';
 
 export type BotInput = Omit<DecodedInput, 'seq' | 'itemPresses'>;
+
+/** Held state of the Smash fight controller (press counters are managed by the bot). */
+export type FightHeld = Pick<DecodedFightInput, 'x' | 'y' | 'attack' | 'special' | 'jump' | 'shield' | 'grab' | 'flick'>;
+export type FightButton = 'attack' | 'special' | 'jump' | 'grab' | 'shield';
+export type FlickDir = 'left' | 'right' | 'up' | 'down';
+
+/** One fighter as the Smash bot brain sees it (a subset of `__smash.getState().fighters[i]`). */
+export interface SmashObsFighter {
+  index: number;
+  /** Lobby slot for humans, -1 for CPUs / dummy. */
+  slot: number;
+  team?: number;
+  human?: boolean;
+  dummy?: boolean;
+  x: number;
+  y: number;
+  /** World units per frame. */
+  vx: number;
+  vy: number;
+  grounded: boolean;
+  action: string;
+  damage: number;
+  out?: boolean;
+  respawning?: boolean;
+  facing?: number;
+}
+
+/** What tests feed `bot.observe()`: fighters + the main stage's edges. */
+export interface SmashObservation {
+  fighters: SmashObsFighter[];
+  /** Main stage top surface: x of its left/right edge and y of the top. */
+  stage?: { left: number; right: number; y: number };
+  /** Fighter index of this bot (default: the human fighter whose slot = this bot's lobby slot). */
+  self?: number;
+  /** Team mode: don't chase team mates. */
+  teams?: boolean;
+}
 
 export class BotConnectError extends Error {
   constructor(
@@ -71,6 +126,8 @@ export class BotPhone {
   state: PhoneState | null = null;
   /** Latest in-race status from the host. */
   race: PhoneRaceStatus | null = null;
+  /** Latest Smash Party in-match status from the host (t:'fight', ~10 Hz). */
+  fight: PhoneFightStatus | null = null;
   /** All fx events received (oldest first). */
   fx: PhoneFx[] = [];
   /** Last server error received (e.g. kicked). */
@@ -90,6 +147,21 @@ export class BotPhone {
   private pingTimer: NodeJS.Timeout | null = null;
   private pingId = 0;
   private pendingPings = new Map<number, (ms: number) => void>();
+  // Smash Party fight controller
+  private fightHeld: FightHeld = { x: 0, y: 0, attack: false, special: false, jump: false, shield: false, grab: false, flick: false };
+  private presses = { attack: 0, special: 0, jump: 0, grab: 0 };
+  private fightSeq = 0;
+  private fightTimer: NodeJS.Timeout | null = null;
+  private releaseTimers = new Set<NodeJS.Timeout>();
+  /** Fight packets sent so far (for tests). */
+  fightPacketsSent = 0;
+  // Smash bot brain
+  private brainTimer: NodeJS.Timeout | null = null;
+  private obs: SmashObservation | null = null;
+  private obsAt = 0;
+  private brain = { busyUntil: 0, t0: 0, step: 0, usedDouble: false, usedUp: false, wasGrounded: true, rand: 1, shieldUntil: 0 };
+  /** Brain decisions taken (for tests / logs). */
+  brainActions: Record<string, number> = {};
 
   private constructor(ws: WebSocket) {
     this.ws = ws;
@@ -211,6 +283,9 @@ export class BotPhone {
       case 'race':
         this.race = msg as unknown as PhoneRaceStatus;
         break;
+      case 'fight':
+        this.fight = msg as unknown as PhoneFightStatus;
+        break;
       case 'fx':
         this.fx.push(msg as unknown as PhoneFx);
         if (this.fx.length > 200) this.fx.shift();
@@ -303,8 +378,25 @@ export class BotPhone {
   quit(): void {
     this.send({ t: 'quit' });
   }
-  post(action: 'next' | 'replay' | 'track' | 'lobby'): void {
-    this.send({ t: 'post', action });
+  /** Results screen (leader). 'switch' = Switch Game (optionally naming the game to switch to). */
+  post(action: 'next' | 'replay' | 'track' | 'lobby' | 'switch', game?: GameId): void {
+    this.send(game ? { t: 'post', action, game } : { t: 'post', action });
+  }
+  /** PARTY HUB: leader picks the active game. */
+  game(id: GameId): void {
+    this.send({ t: 'game', game: id });
+  }
+  /** PARTY HUB: leader edits the active game's setup (smash: Partial<SmashSetup>). */
+  gsetup(setup: Partial<SmashSetup> | Record<string, unknown>): void {
+    this.send({ t: 'gsetup', setup: setup as Record<string, unknown> });
+  }
+  /** PARTY HUB: pick a team (0 red, 1 blue) in team modes. */
+  team(t: number): void {
+    this.send({ t: 'team', team: t });
+  }
+  /** PARTY HUB: sandbox "I'm ready". */
+  practiceDone(): void {
+    this.send({ t: 'practice_done' });
   }
   leader(to: string): void {
     this.send({ t: 'leader', to });
@@ -388,10 +480,368 @@ export class BotPhone {
     this.setInput({ throttle: 0, steer: 0, drift: false, brake: 0 });
   }
 
+
+  // ------------------------------------------------------------- smash input
+
+  /** Merge into the held fight state (sent by the 60 Hz fight loop / sendFightInput). */
+  setFightInput(i: Partial<FightHeld>): void {
+    this.fightHeld = { ...this.fightHeld, ...i };
+  }
+  getFightInput(): Readonly<FightHeld> & { attackPresses: number; specialPresses: number; jumpPresses: number; grabPresses: number } {
+    return {
+      ...this.fightHeld,
+      attackPresses: this.presses.attack,
+      specialPresses: this.presses.special,
+      jumpPresses: this.presses.jump,
+      grabPresses: this.presses.grab,
+    };
+  }
+  /** Send one fight packet now: [1, seq, x, y, buttons, attackPresses, specialPresses, jumpPresses, grabPresses]. */
+  sendFightInput(): void {
+    this.fightPacketsSent++;
+    this.send(
+      encodeFightInput(this.fightSeq++, {
+        ...this.fightHeld,
+        attackPresses: this.presses.attack,
+        specialPresses: this.presses.special,
+        jumpPresses: this.presses.jump,
+        grabPresses: this.presses.grab,
+      }),
+    );
+  }
+  /**
+   * Tap (or hold) a button: bumps its press counter (shield has none), sets the held bit, sends
+   * immediately, and releases it after `holdMs` (sending the release at once too).
+   */
+  press(button: FightButton, holdMs = 70): void {
+    if (button !== 'shield') this.presses[button] = (this.presses[button] + 1) & 255;
+    this.fightHeld = { ...this.fightHeld, [button]: true };
+    this.sendFightInput();
+    this.later(holdMs, () => {
+      this.fightHeld = { ...this.fightHeld, [button]: false };
+      this.sendFightInput();
+    });
+  }
+  /** Flick the stick + ATTACK = smash attack in that direction (hold `holdMs` to charge). */
+  flickAttack(dir: FlickDir, holdMs = 90): void {
+    const x = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+    const y = dir === 'up' ? 1 : dir === 'down' ? -1 : 0;
+    this.presses.attack = (this.presses.attack + 1) & 255;
+    this.fightHeld = { ...this.fightHeld, x, y, flick: true, attack: true };
+    this.sendFightInput();
+    this.later(holdMs, () => {
+      this.fightHeld = { ...this.fightHeld, x: 0, y: 0, flick: false, attack: false };
+      this.sendFightInput();
+    });
+  }
+  /** Start sending fight packets at ~60 Hz. */
+  startFightLoop(hz = 60): void {
+    if (this.fightTimer) return;
+    this.fightTimer = setInterval(() => this.sendFightInput(), 1000 / hz);
+  }
+  stopFightLoop(): void {
+    if (this.fightTimer) clearInterval(this.fightTimer);
+    this.fightTimer = null;
+  }
+  get fighting(): boolean {
+    return this.fightTimer !== null;
+  }
+  /** Release everything (stick centred, no buttons held). */
+  neutralFight(): void {
+    for (const t of this.releaseTimers) clearTimeout(t);
+    this.releaseTimers.clear();
+    this.fightHeld = { x: 0, y: 0, attack: false, special: false, jump: false, shield: false, grab: false, flick: false };
+  }
+  private later(ms: number, fn: () => void): void {
+    const t = setTimeout(() => {
+      this.releaseTimers.delete(t);
+      fn();
+    }, ms);
+    this.releaseTimers.add(t);
+  }
+
+  // ------------------------------------------------------------- smash brain
+
+  /** Feed the brain a snapshot of the fight (tests: from `__smash.getState()` at ~5–10 Hz). */
+  observe(view: SmashObservation): void {
+    this.obs = view;
+    this.obsAt = Date.now();
+  }
+  /** Start the Smash bot brain (also starts the 60 Hz fight loop). Without observations it plays blind. */
+  startSmashBrain(seed = Math.random()): void {
+    this.stopSmashBrain();
+    this.brain = { busyUntil: 0, t0: Date.now(), step: 0, usedDouble: false, usedUp: false, wasGrounded: true, rand: Math.floor(seed * 2147483646) + 1, shieldUntil: 0 };
+    this.startFightLoop();
+    this.brainTimer = setInterval(() => this.think(), 50);
+  }
+  stopSmashBrain(): void {
+    if (this.brainTimer) clearInterval(this.brainTimer);
+    this.brainTimer = null;
+    this.neutralFight();
+    this.stopFightLoop();
+    this.sendFightInput();
+  }
+  get brainRunning(): boolean {
+    return this.brainTimer !== null;
+  }
+
+  private rnd(): number {
+    // Park-Miller LCG: deterministic per bot seed.
+    this.brain.rand = (this.brain.rand * 16807) % 2147483647;
+    return (this.brain.rand - 1) / 2147483646;
+  }
+  private act(name: string, busyMs: number): void {
+    this.brainActions[name] = (this.brainActions[name] ?? 0) + 1;
+    this.brain.busyUntil = Date.now() + busyMs;
+  }
+
+  private think(): void {
+    if (!this.connected) return;
+    const now = Date.now();
+    const obs = this.obs;
+    if (!obs || now - this.obsAt > 1500) {
+      this.thinkBlind(now);
+      return;
+    }
+    const mySlot = this.state?.you?.slot;
+    const me =
+      (obs.self !== undefined ? obs.fighters.find((f) => f.index === obs.self) : undefined) ??
+      obs.fighters.find((f) => f.slot === mySlot && f.human !== false && !f.dummy);
+    if (!me || me.out) {
+      this.setFightInput({ x: 0, y: 0 });
+      return;
+    }
+    // Extrapolate (observations are 5–10 Hz, positions in world units, velocities per 60 Hz frame).
+    const age = Math.min(12, ((now - this.obsAt) / 1000) * 60);
+    const mx = me.x + me.vx * age;
+    const my = me.y + me.vy * age;
+    const stage = obs.stage ?? { left: -7, right: 7, y: 0 };
+    const centre = (stage.left + stage.right) / 2;
+    const towardStage = mx < centre ? 1 : -1;
+    if (me.grounded) {
+      this.brain.usedDouble = false;
+      this.brain.usedUp = false;
+    }
+    if (now < this.brain.busyUntil) return;
+    if (me.respawning || me.action === 'respawn') {
+      // Step off the respawn platform toward the centre.
+      this.setFightInput({ x: centre > mx ? 0.5 : -0.5, y: 0, shield: false });
+      return;
+    }
+    const helpless = me.action === 'helpless' || me.action === 'tumble' || me.action === 'hitstun';
+
+    // ---- RECOVERY: offstage or below the stage -> drift back, double jump, up+special.
+    const offX = mx < stage.left - 0.2 || mx > stage.right + 0.2;
+    const below = my < stage.y - 0.4;
+    if (!me.grounded && (offX || below)) {
+      this.setFightInput({ x: towardStage, y: 0, shield: false, attack: false });
+      if (me.action === 'ledgeHang') {
+        this.setFightInput({ x: towardStage, y: 1 });
+        this.act('ledgeClimb', 250);
+        return;
+      }
+      if (helpless && me.action === 'helpless') return; // already used up-special: just drift back
+      const falling = me.vy < 0.02;
+      if (!this.brain.usedDouble && falling && me.action !== 'hitstun' && me.action !== 'tumble') {
+        this.brain.usedDouble = true;
+        this.press('jump', 80);
+        this.act('doubleJump', 300);
+        return;
+      }
+      if (!this.brain.usedUp && falling && (below || Math.abs(mx - centre) > (stage.right - stage.left) / 2 + 1.5) && me.action !== 'hitstun') {
+        this.brain.usedUp = true;
+        this.setFightInput({ x: towardStage * 0.5, y: 1 });
+        this.press('special', 120);
+        this.act('upSpecial', 500);
+        return;
+      }
+      return;
+    }
+
+    // ---- pick a target: nearest opponent still in play.
+    let best: SmashObsFighter | null = null;
+    let bestD = Infinity;
+    for (const f of obs.fighters) {
+      if (f.index === me.index || f.out || f.respawning || f.action === 'ko' || f.action === 'out') continue;
+      if (obs.teams && f.team !== undefined && f.team === me.team) continue;
+      const d = Math.hypot(f.x - mx, f.y - my);
+      if (d < bestD) {
+        bestD = d;
+        best = f;
+      }
+    }
+    if (!best) {
+      // Nobody to fight: drift to the centre and idle.
+      this.setFightInput({ x: Math.abs(centre - mx) > 1 ? Math.sign(centre - mx) * 0.6 : 0, y: 0, shield: false });
+      return;
+    }
+    const tx = best.x + best.vx * age;
+    const ty = best.y + best.vy * age;
+    const dx = tx - mx;
+    const dy = ty - my;
+    const dir = dx >= 0 ? 1 : -1;
+    const dirName: FlickDir = dir > 0 ? 'right' : 'left';
+    // Don't run off the stage chasing someone who is offstage.
+    const edgeAhead = me.grounded && ((dir > 0 && mx > stage.right - 0.8) || (dir < 0 && mx < stage.left + 0.8));
+
+    // Shield sometimes when an opponent is attacking right next to us.
+    if (me.grounded && Math.abs(dx) < 1.8 && best.action === 'attack' && this.rnd() < 0.25) {
+      this.setFightInput({ x: 0, y: 0, shield: true });
+      this.later(350, () => this.setFightInput({ shield: false }));
+      this.act('shield', 420);
+      return;
+    }
+    this.setFightInput({ shield: false });
+
+    const close = Math.abs(dx) < 1.5 && Math.abs(dy) < 1.4;
+    if (close) {
+      const r = this.rnd();
+      this.setFightInput({ x: 0, y: 0 });
+      if (me.grounded) {
+        if (best.damage >= 80 && r < 0.6) {
+          this.flickAttack(dy > 1 ? 'up' : dirName, 120);
+          this.act('smash', 650);
+        } else if (dy > 0.9 && r < 0.5) {
+          this.setFightInput({ x: 0, y: 0.8 });
+          this.press('attack');
+          this.later(90, () => this.setFightInput({ y: 0 }));
+          this.act('utilt', 350);
+        } else if (r < 0.35) {
+          this.press('attack');
+          this.act('jab', 220);
+        } else if (r < 0.65) {
+          this.setFightInput({ x: dir * 0.6, y: 0 });
+          this.press('attack');
+          this.later(90, () => this.setFightInput({ x: 0 }));
+          this.act('ftilt', 380);
+        } else if (r < 0.8) {
+          this.setFightInput({ x: 0, y: 0 });
+          this.press('special');
+          this.act('nspecial', 500);
+        } else if (r < 0.9) {
+          this.press('grab');
+          this.later(250, () => this.setFightInput({ x: dir }));
+          this.later(400, () => this.setFightInput({ x: 0 }));
+          this.act('grab', 600);
+        } else {
+          this.flickAttack(dirName, 100);
+          this.act('smash', 600);
+        }
+      } else {
+        // Aerials: toward the target = fair, up = uair, below = dair, else nair.
+        const ax = Math.abs(dx) > 0.5 ? dir : 0;
+        const ay = dy > 0.8 ? 1 : dy < -0.8 ? -1 : 0;
+        this.setFightInput({ x: ax * 0.8, y: ay * 0.8 });
+        this.press('attack');
+        this.later(90, () => this.setFightInput({ x: 0, y: 0 }));
+        this.act('aerial', 380);
+      }
+      return;
+    }
+
+    // Approach.
+    if (edgeAhead) {
+      this.setFightInput({ x: 0, y: 0 });
+      if (this.rnd() < 0.15) {
+        this.setFightInput({ x: dir });
+        this.press('special', 80); // side-special / projectile toward the target (stays on stage: x released next)
+        this.later(100, () => this.setFightInput({ x: 0 }));
+        this.act('sideSpecial', 600);
+      }
+      return;
+    }
+    this.setFightInput({ x: Math.abs(dx) > 3 ? dir : dir * 0.7, y: 0 });
+    if (me.grounded && dy > 1.2 && this.rnd() < 0.3) {
+      this.press('jump', 120);
+      this.act('jump', 300);
+    } else if (Math.abs(dx) > 4 && this.rnd() < 0.05) {
+      this.setFightInput({ x: dir, y: 0 });
+      this.press('special'); // neutral/side special from range (projectiles)
+      this.act('rangeSpecial', 500);
+    }
+  }
+
+  /** No observations: a harmless routine around the spawn point (never runs off the stage on purpose). */
+  private thinkBlind(now: number): void {
+    if (now < this.brain.busyUntil) return;
+    // Every step sets the whole stick, and walks come in there-and-back pairs, so the fighter
+    // stays around its spawn point (no drifting off the stage).
+    const step = this.brain.step++ % 12;
+    const side = Math.floor(this.brain.step / 12) % 2 === 0 ? 1 : -1;
+    const stick = (x: number, y = 0): void => this.setFightInput({ x, y, shield: false });
+    switch (step) {
+      case 0:
+        stick(0.45 * side);
+        this.act('blindWalk', 250);
+        break;
+      case 1:
+        stick(-0.45 * side);
+        this.act('blindWalk', 250);
+        break;
+      case 2:
+        stick(0);
+        this.press('attack');
+        this.act('blindJab', 300);
+        break;
+      case 3:
+        stick(0);
+        this.press('jump', 100);
+        this.act('blindJump', 350);
+        break;
+      case 4:
+        stick(0);
+        this.press('attack');
+        this.act('blindAerial', 600);
+        break;
+      case 5:
+        // (no blind specials: some travel far, e.g. dashes, and would carry the fighter off stage)
+        stick(0, -0.8);
+        this.press('attack');
+        this.later(90, () => this.setFightInput({ y: 0 }));
+        this.act('blindDtilt', 400);
+        break;
+      case 6:
+        this.setFightInput({ x: 0, y: 0, shield: true });
+        this.later(400, () => this.setFightInput({ shield: false }));
+        this.act('blindShield', 500);
+        break;
+      case 7:
+        stick(0.5 * side);
+        this.press('attack');
+        this.later(90, () => this.setFightInput({ x: 0 }));
+        this.act('blindTilt', 400);
+        break;
+      case 8:
+        this.flickAttack(side > 0 ? 'right' : 'left', 100);
+        this.act('blindSmash', 700);
+        break;
+      case 9:
+        stick(0, 0.8);
+        this.press('attack');
+        this.later(90, () => this.setFightInput({ y: 0 }));
+        this.act('blindUtilt', 400);
+        break;
+      case 10:
+        stick(0);
+        this.press('grab');
+        this.act('blindGrab', 500);
+        break;
+      default:
+        stick(0);
+        this.act('blindIdle', 300);
+    }
+  }
+
+
   // --------------------------------------------------------------- lifecycle
 
   private stopTimers(): void {
     this.stopDriving();
+    this.stopFightLoop();
+    if (this.brainTimer) clearInterval(this.brainTimer);
+    this.brainTimer = null;
+    for (const t of this.releaseTimers) clearTimeout(t);
+    this.releaseTimers.clear();
     if (this.autoTimer) clearInterval(this.autoTimer);
     this.autoTimer = null;
     if (this.pingTimer) clearInterval(this.pingTimer);
@@ -440,10 +890,16 @@ interface CliOpts {
   track?: string;
   chaos: boolean;
   duration: number;
+  /** Which game the leader picks (default kart = the original Kart Party flow). */
+  game: GameId;
+  stocks: number;
+  stage?: string;
+  teams: boolean;
+  cpus: number;
 }
 
 function parseCli(argv: string[]): CliOpts {
-  const o: CliOpts = { url: 'http://localhost:3000', n: 4, race: false, passive: false, laps: 2, chaos: false, duration: 0 };
+  const o: CliOpts = { url: 'http://localhost:3000', n: 4, race: false, passive: false, laps: 2, chaos: false, duration: 0, game: 'kart', stocks: 2, teams: false, cpus: 0 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = (): string => argv[++i] ?? '';
@@ -456,8 +912,13 @@ function parseCli(argv: string[]): CliOpts {
     else if (a === '--track') o.track = v();
     else if (a === '--chaos') o.chaos = true;
     else if (a === '--duration') o.duration = Number(v()) || 0;
+    else if (a === '--game') o.game = v() === 'smash' ? 'smash' : 'kart';
+    else if (a === '--stocks') o.stocks = Math.max(1, Math.min(5, Number(v()) || 2));
+    else if (a === '--stage') o.stage = v();
+    else if (a === '--teams') o.teams = true;
+    else if (a === '--cpus') o.cpus = Math.max(0, Math.min(4, Number(v()) || 0));
     else if (a === '-h' || a === '--help') {
-      console.log('npm run bots -- --url http://localhost:3000 --n 4 [--room ABCD] [--race] [--passive] [--laps N] [--track ID] [--chaos] [--duration S]');
+      console.log('npm run bots -- --url http://localhost:3000 --n 4 [--room ABCD] [--race] [--passive] [--laps N] [--track ID] [--chaos] [--duration S] [--game smash [--stocks N] [--stage ID] [--teams] [--cpus N]]');
       process.exit(0);
     }
   }
@@ -498,7 +959,55 @@ async function runCli(): Promise<void> {
     lastAct.set(key, now);
     return true;
   };
+  const smashTick = (b: BotPhone, idx: number): void => {
+    const st = b.state;
+    const you = st?.you;
+    const id = b.playerId;
+    const leader = !o.passive && !!you?.isLeader;
+    const screen = st?.screen;
+    const isSmash = st?.game === 'smash';
+    const fightingScreen = isSmash && (screen === 'race' || screen === 'sandbox' || screen === 'tutorial');
+    if (fightingScreen && !b.brainRunning) b.startSmashBrain(idx * 0.21 + 0.1);
+    if (!fightingScreen && b.brainRunning) b.stopSmashBrain();
+
+    if (screen === 'lobby' || screen === 'waiting' || screen === 'title') {
+      if (you && (!you.name || !you.characterId) && once(`${id}:profile`, 2000)) b.profile(names.get(b) ?? 'Bot', pickChar(b, idx));
+      else if (you && !you.ready && once(`${id}:ready`, 1500)) b.ready(true);
+      if (leader && st && screen === 'lobby') {
+        if (!isSmash) {
+          if (once(`${id}:game`, 2000)) b.game('smash');
+        } else if (st.players.filter((p) => p.connected).every((p) => p.ready) && once(`${id}:start`, 3000)) b.start();
+      }
+    } else if (screen === 'tutorial') {
+      if (leader && once(`${id}:skip`, 3000)) b.tutSkip();
+      else if (you && !you.tutorialDone && once(`${id}:tut`, 4000)) b.tutOk();
+    } else if (screen === 'sandbox') {
+      const since = lastAct.get(`${id}:sandboxAt`) ?? 0;
+      if (!since) lastAct.set(`${id}:sandboxAt`, Date.now());
+      else if (Date.now() - since > 5000 + idx * 700 && !(st?.sandbox?.done ?? []).includes(id) && once(`${id}:practice`, 3000)) b.practiceDone();
+      if (leader && since && Date.now() - since > 9000 && once(`${id}:sbstart`, 4000)) b.start();
+    } else if (screen === 'setup' && leader) {
+      lastAct.delete(`${id}:sandboxAt`);
+      if (!isSmash) {
+        if (once(`${id}:game`, 3000)) b.game('smash');
+      } else if (once(`${id}:setup`, 4000)) {
+        b.gsetup({ mode: 'stock', stocks: o.stocks, teams: o.teams, fillCpus: o.cpus, ...(o.stage ? { stageId: o.stage } : {}) });
+        setTimeout(() => b.start(), 800);
+      }
+    } else if (screen === 'setup' && o.teams && you && once(`${id}:team`, 4000)) {
+      b.team(idx % 2);
+    } else if (screen === 'paused' && once(`${id}:resume`, 3000)) {
+      b.resume();
+    } else if (screen === 'results' && leader && once(`${id}:rematch`, 6000)) {
+      setTimeout(() => b.post(isSmash ? 'replay' : 'switch', isSmash ? undefined : 'smash'), 3000);
+    }
+  };
+
   const tick = (): void => {
+    if (o.game === 'smash') {
+      bots.forEach((b, idx) => b.connected && smashTick(b, idx));
+      return;
+    }
     bots.forEach((b, idx) => {
       if (!b.connected) return;
       const st = b.state;
@@ -541,7 +1050,14 @@ async function runCli(): Promise<void> {
       .map((b) => {
         const r = b.race;
         const s = b.state?.screen ?? '-';
-        const race = s === 'race' && r ? ` P${r.place} L${r.lap}/${r.laps}${r.finished ? ' FIN' : ''}${r.item !== 'none' ? ` [${r.item}]` : ''}` : '';
+        const race =
+          o.game === 'smash'
+            ? b.fight && (s === 'race' || s === 'sandbox')
+              ? ` ${b.fight.damage}% stocks=${b.fight.stocks} kos=${b.fight.kos}${b.fight.cpu ? ' CPU' : ''}${b.fight.dummyDamage !== undefined ? ` dummy=${b.fight.dummyDamage}%` : ''}`
+              : ''
+            : s === 'race' && r
+              ? ` P${r.place} L${r.lap}/${r.laps}${r.finished ? ' FIN' : ''}${r.item !== 'none' ? ` [${r.item}]` : ''}`
+              : '';
         return `${names.get(b)}(${b.playerId}${b.connected ? '' : ' OFF'}): ${s}${race}`;
       })
       .join(' | ');

@@ -1,5 +1,5 @@
 /**
- * Kart Party server: Express (static pages + small JSON/QR API) and the
+ * Party Hub server: Express (static pages + small JSON/QR API) and the
  * WebSocket relay, over HTTP and optionally HTTPS (self-signed).
  *
  * `startServer()` is importable so tests/selftests can boot it in-process.
@@ -105,7 +105,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       .status(503)
       .type('html')
       .send(
-        '<h1>Kart Party: game not built</h1><p>Run <code>npm run build</code> (or <code>npm start</code>) and reload.</p>',
+        '<h1>Party Hub: game not built</h1><p>Run <code>npm run build</code> (or <code>npm start</code>) and reload.</p>',
       );
   };
   const sendPage = (file: string) => (_req: Request, res: Response) => {

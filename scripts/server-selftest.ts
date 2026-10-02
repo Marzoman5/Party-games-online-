@@ -182,6 +182,97 @@ async function main(): Promise<void> {
     await Promise.all([a.waitFor((x) => x.fx.length > 0, 2000), b.waitFor((x) => x.fx.length > 0, 2000)]);
     ok(true, 'HostSend broadcast to all phones');
 
+    // ---- PARTY HUB: Smash fight packets (tag 1) + new phone->host message types
+    console.log('Party Hub relay');
+    mark = host.msgs.length;
+    a.setFightInput({ x: -0.5, y: 1, shield: true });
+    a.press('attack', 50);
+    const fpkt = await host.next<unknown[]>((m) => Array.isArray(m) && m[0] === 1 && m[9] === 'p1', 2000, 'fight input', mark);
+    ok(
+      fpkt.length === 10 && fpkt[2] === -50 && fpkt[3] === 100 && fpkt[4] === (1 | 8) && fpkt[5] === 1 && fpkt[6] === 0 && fpkt[7] === 0 && fpkt[8] === 0,
+      `relayed fight input ${JSON.stringify(fpkt)}`,
+    );
+    await sleep(120);
+    mark = host.msgs.length;
+    a.flickAttack('right', 30);
+    const flick = await host.next<unknown[]>((m) => Array.isArray(m) && m[0] === 1 && m[9] === 'p1', 2000, 'flick input', mark);
+    ok(flick[2] === 100 && (Number(flick[4]) & 32) !== 0 && (Number(flick[4]) & 1) !== 0 && flick[5] === 2, `flick attack packet ${JSON.stringify(flick)}`);
+    a.setFightInput({ x: 0, y: 0, shield: false });
+    // Raw packets: extra trailing fields are dropped, wrong/short ones ignored, tag 0 unchanged.
+    mark = host.msgs.length;
+    a.send([1, 77, 10, -20, 4, 9, 8, 7, 6, 'spoofed', 99] as unknown[]);
+    const raw1 = await host.next<unknown[]>((m) => Array.isArray(m) && m[0] === 1 && m[1] === 77, 2000, 'raw fight packet', mark);
+    ok(JSON.stringify(raw1) === JSON.stringify([1, 77, 10, -20, 4, 9, 8, 7, 6, 'p1']), `fight packet relayed as [1..8, playerId] ${JSON.stringify(raw1)}`);
+    mark = host.msgs.length;
+    a.send([1, 78, 1, 2, 3, 4, 5, 6] as unknown[]); // too short
+    a.send([1, 79, 1, 2, 3, 4, 5, 6, 'x'] as unknown[]); // non-numeric
+    a.send([1, 80, 1, 2, 3, NaN, 5, 6, 7] as unknown[]); // NaN -> null in JSON
+    a.send([2, 81, 1, 2, 3, 4, 5, 6, 7] as unknown[]); // unknown tag
+    a.send([0, 82, 10, 100, 0, 1, 3] as unknown[]); // kart packet still relays (marker)
+    const kartAfter = await host.next<unknown[]>((m) => Array.isArray(m) && m[0] === 0 && m[1] === 82, 2000, 'kart marker', mark);
+    ok(JSON.stringify(kartAfter) === JSON.stringify([0, 82, 10, 100, 0, 1, 3, 'p1']), 'tag 0 kart packet unchanged');
+    ok(!host.msgs.slice(mark).some((m) => Array.isArray(m) && [78, 79, 80, 81].includes(m[1] as number)), 'malformed / unknown-tag packets dropped');
+    // Hot path ordering: fight packets arrive in send order, immediately.
+    mark = host.msgs.length;
+    for (let i = 0; i < 50; i++) a.send([1, 1000 + i, 0, 0, 0, 0, 0, 0, 0] as unknown[]);
+    await host.next((m) => Array.isArray(m) && m[1] === 1049, 2000, 'burst end', mark);
+    const seqs = host.msgs.slice(mark).filter((m) => Array.isArray(m) && m[0] === 1).map((m) => (m as number[])[1]);
+    ok(seqs.length === 50 && seqs.every((v, i) => v === 1000 + i), 'fight packet burst relayed in order');
+    // New control messages.
+    const hubMsgs: [string, () => void, (m: Record<string, unknown>) => boolean][] = [
+      ['game', () => a.game('smash'), (m) => m.game === 'smash'],
+      ['gsetup', () => a.gsetup({ stageId: 'arena', stocks: 2, items: true }), (m) => (m.setup as { stageId?: string }).stageId === 'arena'],
+      ['team', () => a.team(1), (m) => m.team === 1],
+      ['practice_done', () => a.practiceDone(), () => true],
+      ['post', () => a.post('switch', 'kart'), (m) => m.action === 'switch' && m.game === 'kart'],
+      ['post', () => a.post('switch'), (m) => m.action === 'switch' && m.game === undefined],
+    ];
+    for (const [t, sendIt, check] of hubMsgs) {
+      mark = host.msgs.length;
+      sendIt();
+      const f = await host.next<{ m: Record<string, unknown> }>(isT('from', (m) => m.p === 'p1' && (m.m as { t?: string }).t === t && check(m.m as Record<string, unknown>)), 2000, `from ${t}`, mark);
+      ok(!!f, `phone '${t}' relayed to host`);
+    }
+    // Phones receive the new host->phone t:'fight' status + fx strength.
+    host.send({ t: 'to', p: 'p1', m: { t: 'fight', characterId: 'zippy', damage: 42, stocks: 3, score: 0, kos: 1, countdown: 0, timeLeft: -1, out: false, respawning: false, cpu: false, team: 0, item: 'none', suddenDeath: false } });
+    host.send({ t: 'to', p: 'p1', m: { t: 'fx', kind: 'hit', strength: 0.7 } });
+    await a.waitFor((x) => x.fight?.damage === 42 && x.fx.some((f) => f.kind === 'hit' && f.strength === 0.7), 2000, 'fight status + fx');
+    ok(a.fight?.kos === 1, 'bot tracks t:fight status and fx strength');
+
+    // Smash bot brain: recovers when offstage (double jump, then up+special toward the stage) and
+    // attacks a nearby opponent.
+    console.log('Smash bot brain');
+    {
+      const stage = { left: -7, right: 7, y: 0 };
+      const fighter = (index: number, x: number, y: number, extra: Partial<Record<string, unknown>> = {}) => ({
+        index, slot: index, human: true, x, y, vx: 0, vy: -0.05, grounded: false, action: 'fall', damage: 0, ...extra,
+      });
+      const before = a.getFightInput();
+      a.startSmashBrain(0.5);
+      const feed = setInterval(() => a.observe({ self: 0, stage, fighters: [fighter(0, -10, -3), fighter(1, 2, 0, { grounded: true, action: 'idle', vy: 0 })] }), 100);
+      a.observe({ self: 0, stage, fighters: [fighter(0, -10, -3), fighter(1, 2, 0, { grounded: true, action: 'idle', vy: 0 })] });
+      await sleep(1500);
+      clearInterval(feed);
+      const after = a.getFightInput();
+      ok(after.jumpPresses > before.jumpPresses && after.specialPresses > before.specialPresses, `offstage: double jump + up special (${JSON.stringify(a.brainActions)})`);
+      ok(after.x > 0, 'offstage: stick held toward the stage');
+      const feed2 = setInterval(() => a.observe({ self: 0, stage, fighters: [fighter(0, 0, 0, { grounded: true, action: 'idle', vy: 0 }), fighter(1, 0.8, 0, { grounded: true, action: 'idle', vy: 0, damage: 30 })] }), 100);
+      a.observe({ self: 0, stage, fighters: [fighter(0, 0, 0, { grounded: true, action: 'idle', vy: 0 }), fighter(1, 0.8, 0, { grounded: true, action: 'idle', vy: 0, damage: 30 })] });
+      const atk0 = a.getFightInput().attackPresses + a.getFightInput().specialPresses + a.getFightInput().grabPresses;
+      await sleep(1500);
+      clearInterval(feed2);
+      const atk1 = a.getFightInput().attackPresses + a.getFightInput().specialPresses + a.getFightInput().grabPresses;
+      ok(atk1 - atk0 >= 2, `close opponent: brain attacks (${atk1 - atk0} presses)`);
+      // Stale observations -> blind routine keeps sending harmless inputs.
+      await sleep(2600);
+      ok(Object.keys(a.brainActions).some((k) => k.startsWith('blind')), 'no fresh observations -> blind routine');
+      const sent = a.fightPacketsSent;
+      await sleep(300);
+      ok(a.fightPacketsSent - sent >= 10, `fight loop sends ~60 Hz (${a.fightPacketsSent - sent} in 300 ms)`);
+      a.stopSmashBrain();
+      ok(!a.brainRunning && !a.fighting, 'brain + fight loop stopped');
+    }
+
     // ---- malformed input never kills the server
     console.log('Robustness');
     const junk = new WebSocket(wsUrl);

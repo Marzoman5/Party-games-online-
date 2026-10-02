@@ -28,6 +28,7 @@ import {
   type PlayerJoined,
   type PlayerLeft,
   type Pong,
+  type RelayedFightInputPacket,
   type RelayedInputPacket,
   type ServerError,
 } from '../src/net/protocol';
@@ -108,6 +109,11 @@ const PHONE_MSG_TYPES = new Set<PhoneToHost['t']>([
   'leader',
   'tips',
   'leave',
+  // PARTY HUB
+  'game',
+  'gsetup',
+  'team',
+  'practice_done',
 ]);
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -419,14 +425,23 @@ export class Hub {
     } catch {
       return;
     }
-    if (!Array.isArray(arr) || arr.length < 7 || arr[0] !== 0) return;
-    for (let i = 1; i < 7; i++) {
+    if (!Array.isArray(arr)) return;
+    const tag: unknown = arr[0];
+    // Tag 0 = kart input (7 fields), tag 1 = PARTY HUB smash fight input (9 fields).
+    const n = tag === 0 ? 7 : tag === 1 ? 9 : 0;
+    if (n === 0 || arr.length < n) return;
+    for (let i = 1; i < n; i++) {
       const v: unknown = arr[i];
       if (typeof v !== 'number' || !Number.isFinite(v)) return;
     }
     const a = arr as number[];
-    const out: RelayedInputPacket = [0, a[1], a[2], a[3], a[4], a[5], a[6], seat.playerId];
-    room.host.sock.send(JSON.stringify(out));
+    if (tag === 0) {
+      const out: RelayedInputPacket = [0, a[1], a[2], a[3], a[4], a[5], a[6], seat.playerId];
+      room.host.sock.send(JSON.stringify(out));
+    } else {
+      const out: RelayedFightInputPacket = [1, a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], seat.playerId];
+      room.host.sock.send(JSON.stringify(out));
+    }
   }
 
   // -------------------------------------------------------------------------
