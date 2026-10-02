@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Smash Party — fighter models</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1d2333; overflow: hidden; font-family: system-ui, sans-serif; }
+  #hud { position: fixed; left: 12px; top: 10px; color: #fff; font-size: 20px; font-weight: 700; text-shadow: 0 2px 4px #000; }
+  #ports { position: fixed; right: 10px; top: 8px; display: flex; gap: 6px; }
+  #ports img { width: 84px; height: 84px; background: radial-gradient(#4a5878, #232a3d); border-radius: 10px; }
+  #stats { position: fixed; left: 12px; bottom: 8px; color: #cfd6e6; font: 12px monospace; }
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="ports"></div>
+<div id="stats"></div>
+<script type="module" src="./models.ts"></script>
+</body>
+</html>
