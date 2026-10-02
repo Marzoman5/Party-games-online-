@@ -189,7 +189,8 @@ export type ScreenId =
   | 'race' // countdown + racing + finished (still driving)
   | 'paused'
   | 'results'
-  | 'waiting'; // late joiner while a race is running
+  | 'waiting' // late joiner while a race is running
+  | 'sandbox'; // PARTY HUB: Smash Party "try it" practice (training stage + dummy) after the tutorial
 
 export type RaceMode = 'single' | 'gp';
 export type EngineCC = 50 | 100 | 150;
@@ -204,6 +205,8 @@ export interface LobbyPlayer {
   isLeader: boolean;
   /** Tutorial "Got it!" tapped. */
   tutorialDone: boolean;
+  /** PARTY HUB: team (0 = red, 1 = blue) for team modes. Always present from the hub host. */
+  team?: number;
 }
 
 export interface RaceSetup {
@@ -225,6 +228,16 @@ export interface ResultRow {
   /** GP only: points earned this race / running total. */
   points?: number;
   total?: number;
+  /** PARTY HUB / Smash Party stats (absent for kart rows). */
+  kos?: number;
+  falls?: number;
+  damageDealt?: number;
+  /** Time mode score (KOs - falls - SDs). */
+  score?: number;
+  stocksLeft?: number;
+  team?: number;
+  /** True for CPU fighters / AI racers. */
+  cpu?: boolean;
 }
 
 /** Full menu/session snapshot. Host sends it to each phone whenever it changes (personalised `you`). */
@@ -244,6 +257,172 @@ export interface PhoneState {
   results: { rows: ResultRow[]; gpFinal: boolean } | null;
   /** Settings the host applies to everyone (tips etc.). */
   tipsEnabled: boolean;
+
+  // ----- PARTY HUB additions (always sent by the hub host; optional for compatibility) -----
+  /** The active game. Decides the phone's controller layout, setup and results screens. */
+  game?: GameId;
+  /** Game picker entries (leader picks in the lobby / after a match). */
+  games?: GameInfo[];
+  /** The active game's setup (kart: same as `setup`; smash: SmashSetup). Leader edits with `gsetup`. */
+  gameSetup?: Record<string, unknown>;
+  /** Sandbox ("try it" practice): players who tapped "I'm ready". */
+  sandbox?: { done: string[] } | null;
+  /** Extra result info for the active game. */
+  resultsInfo?: { game: GameId; winner: string; winnerTeam?: number; mode?: string } | null;
+}
+
+// ---------------------------------------------------------------------------
+// PARTY HUB — multi-game additions (all additive).
+// ---------------------------------------------------------------------------
+
+export type GameId = 'kart' | 'smash';
+export const GAME_IDS: readonly GameId[] = ['kart', 'smash'];
+
+export interface GameInfo {
+  id: GameId;
+  title: string;
+  tagline: string;
+  emoji: string;
+  /** CSS colour for cards. */
+  color: string;
+  minPlayers: number;
+  maxPlayers: number;
+}
+
+/** Team colours (team 0 red, team 1 blue). */
+export const TEAM_COLORS = ['#ff4d4d', '#3d8bff'] as const;
+
+/** Smash Party match setup (leader edits it with `gsetup`). */
+export interface SmashSetup {
+  stageId: string;
+  mode: 'stock' | 'time';
+  /** 1..5, default 3. */
+  stocks: number;
+  /** Time mode length in seconds (60..300), default 120. */
+  timeSec: number;
+  teams: boolean;
+  friendlyFire: boolean;
+  /** CPU fighters fill empty slots up to this total fighter count (humans + cpus, 2..4). 0 = no CPUs. */
+  fillCpus: number;
+  /** CPU level 1..9. */
+  cpuLevel: number;
+  items: boolean;
+  itemFrequency: 'low' | 'medium' | 'high';
+  /** Stage hazards / moving platforms (stage 3). */
+  hazards: boolean;
+}
+
+export const DEFAULT_SMASH_SETUP: SmashSetup = {
+  stageId: 'skyline',
+  mode: 'stock',
+  stocks: 3,
+  timeSec: 120,
+  teams: false,
+  friendlyFire: false,
+  fillCpus: 0,
+  cpuLevel: 3,
+  items: true,
+  itemFrequency: 'medium',
+  hazards: true,
+};
+
+// ----- Smash input packet (phone -> server -> host) ------------------------
+// Phone sends:   [1, seq, x, y, buttons, attackPresses, specialPresses, jumpPresses, grabPresses]
+// Server relays: [1, seq, x, y, buttons, attackPresses, specialPresses, jumpPresses, grabPresses, playerId]
+//   x, y        int -100..100  analog stick (y > 0 = UP)
+//   buttons     bitmask of FBTN_* (held state)
+//   *Presses    uint 0..255 wrapping counters, +1 on every touch-down of that button. The host
+//               buffers each new press for ~5 frames (input buffering), so mashing over Wi-Fi
+//               never loses a press. Tap-jump (flick up) also increments jumpPresses.
+// Sent at 60 Hz while in a match / sandbox / tutorial and immediately on any button edge.
+export const FBTN_ATTACK = 1;
+export const FBTN_SPECIAL = 2;
+export const FBTN_JUMP = 4;
+export const FBTN_SHIELD = 8;
+export const FBTN_GRAB = 16;
+/** Stick was flicked (centre -> edge within ~70 ms) in the last ~120 ms: ATTACK now = smash attack. */
+export const FBTN_FLICK = 32;
+
+export type FightInputPacket = [1, number, number, number, number, number, number, number, number];
+export type RelayedFightInputPacket = [1, number, number, number, number, number, number, number, number, string];
+
+export interface DecodedFightInput {
+  seq: number;
+  x: number; // -1..1
+  y: number; // -1..1 (up positive)
+  attack: boolean;
+  special: boolean;
+  jump: boolean;
+  shield: boolean;
+  grab: boolean;
+  flick: boolean;
+  attackPresses: number;
+  specialPresses: number;
+  jumpPresses: number;
+  grabPresses: number;
+}
+
+export function encodeFightInput(seq: number, i: Omit<DecodedFightInput, 'seq'>): FightInputPacket {
+  const c = (v: number): number => Math.round(Math.max(-1, Math.min(1, Number.isFinite(v) ? v : 0)) * 100);
+  const b =
+    (i.attack ? FBTN_ATTACK : 0) |
+    (i.special ? FBTN_SPECIAL : 0) |
+    (i.jump ? FBTN_JUMP : 0) |
+    (i.shield ? FBTN_SHIELD : 0) |
+    (i.grab ? FBTN_GRAB : 0) |
+    (i.flick ? FBTN_FLICK : 0);
+  return [1, seq | 0, c(i.x), c(i.y), b, i.attackPresses & 255, i.specialPresses & 255, i.jumpPresses & 255, i.grabPresses & 255];
+}
+
+export function decodeFightInput(p: readonly unknown[]): DecodedFightInput | null {
+  if (!Array.isArray(p) || p[0] !== 1 || p.length < 9) return null;
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const b = n(p[4]);
+  return {
+    seq: n(p[1]),
+    x: Math.max(-1, Math.min(1, n(p[2]) / 100)),
+    y: Math.max(-1, Math.min(1, n(p[3]) / 100)),
+    attack: (b & FBTN_ATTACK) !== 0,
+    special: (b & FBTN_SPECIAL) !== 0,
+    jump: (b & FBTN_JUMP) !== 0,
+    shield: (b & FBTN_SHIELD) !== 0,
+    grab: (b & FBTN_GRAB) !== 0,
+    flick: (b & FBTN_FLICK) !== 0,
+    attackPresses: n(p[5]) & 255,
+    specialPresses: n(p[6]) & 255,
+    jumpPresses: n(p[7]) & 255,
+    grabPresses: n(p[8]) & 255,
+  };
+}
+
+/** ~10 Hz in-match status for one phone while the active game is Smash Party. */
+export interface PhoneFightStatus {
+  t: 'fight';
+  characterId: string;
+  /** Damage percent (0..999). */
+  damage: number;
+  /** Stocks left (stock mode) or -1 in time mode. */
+  stocks: number;
+  /** Time mode: current score. */
+  score: number;
+  kos: number;
+  /** Seconds until GO during the countdown (3,2,1), 0 after. */
+  countdown: number;
+  /** Seconds left in time mode (-1 in stock mode). */
+  timeLeft: number;
+  /** Out of the match (no stocks left). */
+  out: boolean;
+  /** Respawning / KO'd right now. */
+  respawning: boolean;
+  /** CPU is controlling this fighter (phone disconnected). */
+  cpu: boolean;
+  team: number;
+  /** Held item kind ('none' when empty). */
+  item: string;
+  /** Sudden death in progress. */
+  suddenDeath: boolean;
+  /** Sandbox only: the training dummy's damage %. */
+  dummyDamage?: number;
 }
 
 /** Low-rate (~10 Hz) in-race status for one phone. */
@@ -266,10 +445,26 @@ export interface PhoneRaceStatus {
 /** One-shot feedback events for haptics/sfx on the phone. */
 export interface PhoneFx {
   t: 'fx';
-  kind: 'hit' | 'miniturbo' | 'lap' | 'finalLap' | 'item' | 'go' | 'finish' | 'boost';
+  kind:
+    | 'hit'
+    | 'miniturbo'
+    | 'lap'
+    | 'finalLap'
+    | 'item'
+    | 'go'
+    | 'finish'
+    | 'boost'
+    // PARTY HUB / Smash Party:
+    | 'ko' // you were KO'd
+    | 'koOther' // you KO'd someone
+    | 'shieldBreak'
+    | 'land' // you landed a hit (light tick)
+    | 'game'; // "GAME!"
+  /** 0..1 strength (Smash hits: scales the vibration). */
+  strength?: number;
 }
 
-export type HostToPhone = PhoneState | PhoneRaceStatus | PhoneFx;
+export type HostToPhone = PhoneState | PhoneRaceStatus | PhoneFx | PhoneFightStatus;
 
 export type PhoneToHost =
   | { t: 'profile'; name: string; characterId: string }
@@ -283,12 +478,17 @@ export type PhoneToHost =
   | { t: 'resume' } // leader resumes; others vote
   | { t: 'restart' } // leader
   | { t: 'quit' } // leader: back to lobby
-  | { t: 'post'; action: 'next' | 'replay' | 'track' | 'lobby' } // leader, results screen
+  | { t: 'post'; action: 'next' | 'replay' | 'track' | 'lobby' | 'switch'; game?: GameId } // leader, results screen (replay = Rematch, track = Change Settings, switch = Switch Game)
   | { t: 'leader'; to: string } // leader hands over
   | { t: 'tips'; enabled: boolean } // leader toggles contextual tips
-  | { t: 'leave' }; // player leaves the party
+  | { t: 'leave' } // player leaves the party
+  // ----- PARTY HUB additions -----
+  | { t: 'game'; game: GameId } // leader picks the active game (lobby / setup / results)
+  | { t: 'gsetup'; setup: Record<string, unknown> } // leader edits the active game's setup (smash: Partial<SmashSetup>)
+  | { t: 'team'; team: number } // a player picks their team (team modes)
+  | { t: 'practice_done' }; // sandbox: "I'm ready" (leaves the practice)
 
 export type ServerToHost = HostWelcome | PlayerJoined | PlayerLeft | FromPhone | ServerError | Pong;
 export type ServerToPhone = PhoneWelcome | ServerError | Pong | HostStatus | HostToPhone;
 export type HostToServer = HostHello | HostSend | HostKick | Ping;
-export type PhoneToServer = PhoneHello | Ping | PhoneToHost | InputPacket;
+export type PhoneToServer = PhoneHello | Ping | PhoneToHost | InputPacket | FightInputPacket;
