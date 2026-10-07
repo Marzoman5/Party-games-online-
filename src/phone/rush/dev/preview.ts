@@ -69,4 +69,4 @@ root.append(view.el);
 view.update('race');
 if (q.get('menu') === '1') (view.el.querySelector('[data-testid="rush-menu-btn"]') as HTMLButtonElement)?.click();
 setInterval(() => view.update('race'), 250);
-(window as unknown as { __preview: { ready: boolean } }).__preview = { ready: true };
+(window as unknown as { __preview: unknown }).__preview = { ready: true, view, rush };

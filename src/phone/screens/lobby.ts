@@ -125,6 +125,8 @@ export class LobbyView implements View {
   private gameKey = '';
   private gameLocal: GameId | null = null;
   private gameLocalAt = 0;
+  private grid!: HTMLElement;
+  private gameNote: HTMLElement = h('div', { class: 'game-note', testid: 'game-note' });
 
   constructor() {
     lobbyRefresh = () => this.update(this.lastView);
@@ -154,6 +156,7 @@ export class LobbyView implements View {
     });
 
     const grid = h('div', { class: 'racers' });
+    this.grid = grid;
     for (const c of CHARACTERS) {
       const card = racerCard(c);
       this.cards.set(c.id, card);
@@ -167,6 +170,7 @@ export class LobbyView implements View {
       'section',
       { class: 'profile scrollable' },
       this.banner,
+      this.gameNote,
       h('label', { class: 'field' }, h('span', { class: 'field-label', text: 'Your name' }), this.nameInput),
       grid,
       this.info,
@@ -218,14 +222,27 @@ export class LobbyView implements View {
     const waiting = view === 'waiting';
     const game = activeGame();
     const smash = game === 'smash';
+    const rushGame = game === 'rush';
     toggleClass(this.el, 'g-smash', smash);
+    toggleClass(this.el, 'g-rush', rushGame);
+    // Characters don't matter in Party Rush (colour + emoji + name identify you).
+    show(this.grid, !rushGame);
+    show(this.info, !rushGame);
+    let note = '';
+    if (rushGame) {
+      note = '⚡ Jump in any time — no setup!';
+      if (ps?.secure === false) note += '\nMotion controls need the host’s secure mode — touch controls will be used.';
+    }
+    setText(this.gameNote, note);
+    show(this.gameNote, note !== '');
     this.el.setAttribute('data-game', game);
     this.renderGamePick(!!you?.isLeader && !waiting);
-    setText(this.sideTitle, smash ? 'Fighters' : 'Racers');
+    setText(this.sideTitle, smash ? 'Fighters' : rushGame ? 'Players' : 'Racers');
 
     // Banner
     let bannerText = '';
     if (view === 'connecting') bannerText = state.conn === 'reconnecting' ? 'Reconnecting…' : 'Joining the party…';
+    else if (waiting && ps?.watch === 'full') bannerText = "You're watching this one 👀 — the first 4 to join are playing. Cheer them on!";
     else if (waiting) bannerText = smash ? "🥊 A match is in progress — you'll join the next one!" : "🏁 A race is in progress — you'll join the next one!";
     else if (view === 'title') bannerText = '🎉 You’re in! Getting the lobby ready…';
     setText(this.banner, bannerText);
@@ -253,7 +270,7 @@ export class LobbyView implements View {
 
     // Players
     const players = ps?.players ?? [];
-    const key = JSON.stringify(players) + (state.playerId ?? '');
+    const key = JSON.stringify(players) + (state.playerId ?? '') + game;
     if (key !== this.plistKey) {
       this.plistKey = key;
       this.renderPlayers(players);
@@ -291,7 +308,7 @@ export class LobbyView implements View {
       toggleClass(this.tipsBtn, 'on', !!ps?.tipsEnabled);
       this.renderTransfer(players);
     } else if (waiting) {
-      setText(this.reason, 'Pick your name and racer while you wait');
+      setText(this.reason, ps?.watch === 'full' ? 'Pick your name while you watch' : 'Pick your name and racer while you wait');
     } else if (you) {
       setText(this.reason, ready ? `Waiting for ${leaderName} to start…` : 'Tap READY when you’re set!');
     } else {
@@ -338,13 +355,14 @@ export class LobbyView implements View {
 
   private renderPlayers(players: LobbyPlayer[]): void {
     this.plist.textContent = '';
+    toggleClass(this.plist, 'many', players.length > 6);
     if (!players.length) {
       this.plist.append(h('div', { class: 'pempty', text: 'Waiting for racers…' }));
       return;
     }
     for (const p of [...players].sort((a, b) => a.slot - b.slot)) {
       const me = p.playerId === state.playerId;
-      const col = SLOT_COLORS[p.slot] ?? '#888';
+      const col = SLOT_COLORS[p.slot % SLOT_COLORS.length] ?? '#888';
       const row = h(
         'div',
         {
@@ -352,8 +370,8 @@ export class LobbyView implements View {
           style: `--pc:${col}`,
           testid: `player-${p.playerId}`,
         },
-        h('span', { class: 'pslot', text: String(p.slot + 1) }),
-        avatarSvg(charById(p.characterId), 30),
+        h('span', { class: `pslot${p.emoji ? ' emo' : ''}`, text: p.emoji || String(p.slot + 1) }),
+        activeGame() === 'rush' ? null : avatarSvg(charById(p.characterId), 30),
         h(
           'span',
           { class: 'pname' },

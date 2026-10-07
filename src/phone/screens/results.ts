@@ -1,7 +1,7 @@
 /** Results: standings (kart: times + GP points; smash: KOs / falls / damage) and the leader's what-next buttons. */
 import type { ResultRow } from '../../net/protocol';
 import { TEAM_COLORS } from '../../net/protocol';
-import { gameInfo, otherGame } from '../games';
+import { otherGames } from '../games';
 import { net } from '../net';
 import { activeGame, state, type ViewId } from '../store';
 import { avatarSvg, button, charById, fmtTime, h, ordSuffix, setText, show, toggleClass } from '../ui';
@@ -17,7 +17,9 @@ export class ResultsView implements View {
   private next: HTMLButtonElement;
   private replay: HTMLButtonElement;
   private track: HTMLButtonElement;
-  private sw: HTMLButtonElement;
+  /** Switch Game picker: one button per other game (never a blind cycle). */
+  private sw: HTMLElement;
+  private swKey = '';
   private lobby: HTMLButtonElement;
   private wait: HTMLElement;
   private leaderBox: HTMLElement;
@@ -28,7 +30,7 @@ export class ResultsView implements View {
     this.next = button('Next Race ▶', 'btn-next', () => net.send({ t: 'post', action: 'next' }), 'btn btn-start');
     this.replay = button('↻ Replay', 'btn-replay', () => net.send({ t: 'post', action: 'replay' }), 'btn btn-alt');
     this.track = button('🗺 Change Track', 'btn-track', () => net.send({ t: 'post', action: 'track' }), 'btn btn-alt');
-    this.sw = button('⇄ Switch Game', 'btn-post-switch', () => net.send({ t: 'post', action: 'switch', game: otherGame() }), 'btn btn-alt btn-switch');
+    this.sw = h('div', { class: 'switch-pick', testid: 'btn-post-switch' });
     this.lobby = button('⌂ Back to Lobby', 'btn-lobby', () => net.send({ t: 'post', action: 'lobby' }), 'btn btn-alt');
     this.wait = h('div', { class: 'wait-msg', testid: 'results-wait' });
     this.leaderBox = h('div', { class: 'post-btns' }, this.next, this.replay, this.track, this.sw, this.lobby);
@@ -96,9 +98,17 @@ export class ResultsView implements View {
       show(this.next, true);
       setText(this.next, final ? '🏆 New Grand Prix' : 'Next Race ▶');
     }
-    const other = gameInfo(otherGame());
-    setText(this.sw, `⇄ Play ${other.title}`);
-    show(this.sw, hub);
+    const others = otherGames();
+    const swKey = others.map((g) => g.id + g.title + g.emoji).join('|');
+    if (swKey !== this.swKey) {
+      this.swKey = swKey;
+      this.sw.textContent = '';
+      for (const g of others) {
+        const b = button(`⇄ ${g.emoji} ${g.title}`, `btn-post-switch-${g.id}`, () => net.send({ t: 'post', action: 'switch', game: g.id }), 'btn btn-alt btn-switch');
+        this.sw.append(b);
+      }
+    }
+    show(this.sw, hub && others.length > 0);
     show(this.leaderBox, leader);
     show(this.wait, !leader);
     const leaderName = ps?.players.find((p) => p.isLeader)?.name ?? 'the leader';
