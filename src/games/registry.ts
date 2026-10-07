@@ -7,6 +7,7 @@ import type { IGameHost } from '../game/api';
 import type { GameModule } from '../engine/GameModule';
 import { KartModule } from './kart/KartModule';
 import { SmashModule } from './smash/module/SmashModule';
+import { RushModule } from './rush/RushModule';
 
 export interface RegistryOptions {
   /** The kart engine (Game, or StubGame with ?stub=1) — constructed eagerly at boot. */
@@ -16,5 +17,5 @@ export interface RegistryOptions {
 }
 
 export function createGameModules(o: RegistryOptions): GameModule[] {
-  return [new KartModule(o.kart), new SmashModule(o.container)];
+  return [new KartModule(o.kart), new SmashModule(o.container), new RushModule(o.container)];
 }
