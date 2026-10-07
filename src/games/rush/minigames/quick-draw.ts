@@ -88,6 +88,8 @@ export const quickDraw: MinigameDef = {
     let drawFlashT = -10;
     let tokenR = 60;
     let rows = 1;
+    /** Final standings (computed once the round is over), for the end-of-round TV state. */
+    let final: Map<Cowboy, { place: number; avg: number; allOut: boolean }> | null = null;
 
     const present = (c: Cowboy): boolean => ctx.isPresent(c.p.id);
     const holstered = (c: Cowboy): boolean => c.p.touch || c.pitch === null || c.pitch <= T.downPitch;
@@ -383,6 +385,13 @@ export const quickDraw: MinigameDef = {
         drawText(g, 'DRAW!', 960, y, 240 * k, GREEN, { outline: 22 });
         return;
       }
+      if (final) {
+        let win: Cowboy | null = null;
+        for (const [c, f] of final) if (f.place === 1 && !f.allOut) win = c;
+        if (win) drawText(g, `🏆 ${win.p.name}  ${(final.get(win) as { avg: number }).avg.toFixed(3)} s`, 960, y, 84, PAL.gold, { maxWidth: 1760 });
+        else drawText(g, 'NOBODY! 🌵', 960, y, 96, '#fff');
+        return;
+      }
       if (phase === 'reveal' || phase === 'over') {
         if (fastest) {
           drawText(g, `FASTEST: ${fastest.p.name}  ${(fastest.cur as Shot).t.toFixed(3)} s`, 960, y, 76, PAL.gold, { maxWidth: 1760 });
@@ -482,6 +491,11 @@ export const quickDraw: MinigameDef = {
       render(g, v: RenderView) {
         const t = v.t;
         lastViewT = t;
+        if (!final && (phase === 'over' || v.phase === 'results')) {
+          final = new Map();
+          const ranked = rankBy(boys.filter(present).map((c) => ({ id: c.p.id, c, s: score(c) })), (x) => x.s.avg, true);
+          for (const x of ranked) final.set(x.c, { place: x.place, avg: x.s.avg, allOut: x.s.allOut });
+        }
         background(g);
         drawFakes(g, t);
         // DRAW flash
@@ -494,17 +508,22 @@ export const quickDraw: MinigameDef = {
         const lblSize = Math.max(22, tokenR * 0.62);
         for (const c of boys) {
           const on = present(c);
-          const isFast = c === fastest && (phase === 'reveal' || phase === 'over');
+          const isFast = final ? final.get(c)?.place === 1 : c === fastest && phase === 'reveal';
           const sway = phase === 'wait' ? Math.sin(t * 2 + c.idx) * 3 : 0;
           const jump = c.cur?.kind === 'ok' ? Math.max(0, 1 - (t - c.popT) * 4) * 20 : 0;
+          g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
           drawToken(g, c.p, c.x + sway, c.y - jump, tokenR, { dim: !on, touchBadge: false, ring: isFast ? PAL.gold : c.cur?.kind === 'out' ? PAL.bad : undefined });
           hat(g, c.x + sway, c.y - jump - tokenR * 0.8, tokenR, c.p.color);
           if (c.p.touch) emoji(g, '👆', c.x + sway - tokenR * 0.95, c.y - jump - tokenR * 0.35, tokenR * 0.55, on ? 1 : 0.4);
           // status chip
           const sy = c.y + tokenR + lblSize * 1.6 + 16;
           const cs = clamp(tokenR * 0.5, 22, 38);
+          const fin = final?.get(c);
           if (!on) {
             chip(g, 'AWAY', c.x, sy, cs, 'rgba(0,0,0,0.45)', '#bbb');
+          } else if (fin) {
+            const bg = fin.place === 1 ? '#b8860b' : fin.place === 2 ? '#6b7280' : fin.place === 3 ? '#9a5a2c' : 'rgba(0,0,0,0.55)';
+            chip(g, fin.allOut ? 'OUT' : `#${fin.place} · ${fin.avg.toFixed(3)}`, c.x, sy, cs * 0.9, bg);
           } else if (c.cur) {
             const pop = ease.outBack(clamp01((t - c.popT) / 0.2));
             if (c.cur.kind === 'ok') chip(g, `${c.cur.t.toFixed(3)}`, c.x, sy, cs * (0.6 + 0.4 * pop), isFast ? '#b8860b' : '#15803d');

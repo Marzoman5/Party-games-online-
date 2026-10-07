@@ -132,7 +132,7 @@ export class TouchPad {
       case 'hold':
         return ['HOLD', 'press & keep your thumb still'];
       case 'pose':
-        return ['', 'swipe ↑ ↓ ← → · tap = face up · double tap = face down'];
+        return ['', 'swipe like the picture'];
       default:
         return ['TAP!', ''];
     }

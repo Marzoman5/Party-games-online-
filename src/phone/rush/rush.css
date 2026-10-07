@@ -171,6 +171,9 @@
   text-transform: uppercase;
   letter-spacing: -0.02em;
 }
+.rz-word.w-first {
+  text-transform: none;
+}
 .rz-word.w-title {
   text-transform: uppercase;
 }
@@ -1114,4 +1117,29 @@
 .rz-menu-done {
   background: #fff;
   color: #17112e;
+}
+
+/* fishing reel progress (cue.v with show:'fish') */
+.rz-art.fish {
+  flex-direction: column;
+  gap: 10px;
+}
+.rz-reel {
+  display: none;
+  width: min(70vw, 300px);
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 3px solid #fff;
+  overflow: hidden;
+}
+.rz-art.reeling .rz-reel {
+  display: block;
+}
+.rz-reel i {
+  display: block;
+  height: 100%;
+  width: calc(var(--reel, 0) * 100%);
+  background: #fff;
+  transition: width 0.15s;
 }

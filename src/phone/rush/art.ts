@@ -123,8 +123,7 @@ export function bombSvg(): string {
 /** A fish on the hook (Fishing bite). */
 export function fishSvg(): string {
   return `<svg class="rz-fish-svg" viewBox="0 0 220 200" aria-hidden="true">
-    <path d="M110 0 V62" stroke="#fff" stroke-width="4"/>
-    <path d="M110 60 v22 q0 14 -12 14 q-10 0 -10 -10" fill="none" stroke="#e6e6f0" stroke-width="6" stroke-linecap="round"/>
+    <path d="M58 0 V100" stroke="#fff" stroke-width="4"/>
     <g class="fish">
       <path d="M150 120 L206 88 L198 124 L206 160 Z" fill="#ff9f1a" stroke="${INK}" stroke-width="5" stroke-linejoin="round"/>
       <ellipse cx="104" cy="124" rx="62" ry="40" fill="#ffc21a" stroke="${INK}" stroke-width="5"/>
@@ -132,6 +131,7 @@ export function fishSvg(): string {
       <path d="M118 104 Q128 124 118 146" fill="none" stroke="${INK}" stroke-width="3" opacity=".5"/>
       <circle cx="70" cy="112" r="11" fill="#fff" stroke="${INK}" stroke-width="3"/><circle cx="67" cy="112" r="5" fill="${INK}"/>
       <path d="M44 132 q8 6 16 0" fill="none" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>
+      <path d="M58 98 v26 q0 12 -9 12 q-7 0 -7 -7" fill="none" stroke="#e6e6f0" stroke-width="6" stroke-linecap="round"/>
     </g>
     <text x="24" y="70" font-size="34" font-weight="900" fill="#fff" class="excl">!</text>
     <text x="180" y="56" font-size="34" font-weight="900" fill="#fff" class="excl">!</text>

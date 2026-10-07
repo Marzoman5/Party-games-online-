@@ -139,6 +139,7 @@ export const dontMove: MinigameDef = {
       g.restore();
       // token inside the ice
       const ty = iy + ih * 0.42;
+      g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
       drawToken(g, s.p, s.cx + jx, ty + jy, tokenR, {
         dim: !on,
         wobble: clamp01(m * 1.6),

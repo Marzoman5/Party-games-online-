@@ -649,8 +649,12 @@ export class RushView implements ControllerLayout {
           sub = touch ? (POSE_SWIPES[p] ?? '').toUpperCase() : '';
         } else if (cue?.show === 'fish') {
           this.setWord(word || 'YANK!', 'w-huge w-fish', 30);
-          this.setArt('fish', fishSvg(), 'rush-fish', 'fish');
-          sub = touch ? 'TAP NOW!' : '';
+          this.setArt('fish', `${fishSvg()}<div class="rz-reel"><i></i></div>`, 'rush-fish', 'fish');
+          // Same cue id, new v (reel progress) / word: re-render only, never re-fire the triple cue.
+          const reel = Math.max(0, Math.min(1, cue.v ?? 0));
+          this.art.style.setProperty('--reel', reel.toFixed(3));
+          toggleClass(this.art, 'reeling', reel > 0);
+          sub = touch ? (reel > 0 ? 'MASH to reel!' : 'TAP NOW!') : reel > 0 ? 'SHAKE to reel!' : '';
         } else {
           this.setWord(word || 'GO!', 'w-huge', 28);
           this.setArt('none', '', null);

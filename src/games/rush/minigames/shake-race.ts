@@ -76,6 +76,7 @@ export const shakeRace: MinigameDef = {
     let over = false;
     let playing = false;
     let lastViewT = 0;
+    let curPhase: RenderView['phase'] = 'count';
     // run-track layout
     let laneH = 100;
     let tokenR = 40;
@@ -154,7 +155,7 @@ export const shakeRace: MinigameDef = {
         const stride = Math.sin(r.phase);
         const bob = r.finishAt === null ? -Math.abs(stride) * laneH * 0.1 * Math.min(1, r.eff * 2) : 0;
         // dust puffs
-        if (on && r.eff > 0.25 && r.finishAt === null) {
+        if (on && curPhase === 'play' && r.eff > 0.25 && r.finishAt === null) {
           g.fillStyle = 'rgba(255,230,200,0.35)';
           for (let k = 0; k < 3; k++) {
             const ph = (t * 3 + k / 3 + r.idx * 0.13) % 1;
@@ -167,6 +168,7 @@ export const shakeRace: MinigameDef = {
           const place = r.place;
           drawText(g, placeText(place), finishX - tokenR - 24, r.cy, Math.min(64, laneH * 0.62), placeColor(place), { align: 'right' });
         }
+        g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
         drawToken(g, r.p, x, r.cy + bob, tokenR, {
           labelPos: 'right',
           labelScale: n > 10 ? 1.1 : 1,
@@ -241,6 +243,7 @@ export const shakeRace: MinigameDef = {
         drawText(g, `${Math.floor(r.dist * 100)}%`, bx, by, Math.max(26, Math.min(56, R * 0.5)), '#fff');
       }
       if (isLead && r.finishAt === null) drawEmoji(g, '👑', bx, by - R * 1.05 - 26, 48);
+      g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
       drawToken(g, r.p, r.cx + Math.sin(r.phase) * 4 * r.eff, tokenY, tokenR, { dim: !on, ring: isLead ? PAL.gold : undefined });
     }
 
@@ -344,6 +347,7 @@ export const shakeRace: MinigameDef = {
         drawText(g, `${Math.floor(r.dist * 100)}%`, bx + W * 0.5 + 12, bottomY - bodyH * 0.5, Math.max(26, Math.min(48, r.cw * 0.13)), '#fff', { align: 'left' });
       }
       if (isLead && r.finishAt === null) drawEmoji(g, '👑', bx, bottomY - H - 30, 46);
+      g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
       drawToken(g, r.p, r.cx, tokenY, tokenR, { dim: !on, ring: isLead ? PAL.gold : undefined });
     }
 
@@ -439,6 +443,7 @@ export const shakeRace: MinigameDef = {
       },
       render(g, v: RenderView) {
         lastViewT = v.t;
+        curPhase = v.phase;
         for (const r of runners) if (r.finishAt !== null && r.doneT === null) r.doneT = v.t;
         if (theme.id === 'run') drawRun(g, v.t);
         else drawGridTheme(g, v.t);

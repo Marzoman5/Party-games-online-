@@ -1079,7 +1079,7 @@ export class RushShell {
       touch: meta.touch,
       cd: this.phase === 'count' ? this.cd : 0,
       left: Math.ceil(Math.max(0, r.duration - r.time)),
-      me: { st: 'play', name: p.name, emoji: p.emoji, color: p.color, pts: 0, rank: 0, lead: false },
+      me: ((t) => (t === undefined ? { st: 'play' as const, name: p.name, emoji: p.emoji, color: p.color, pts: 0, rank: 0, lead: false } : { st: 'play' as const, name: p.name, emoji: p.emoji, color: p.color, pts: 0, rank: 0, lead: false, team: t }))(this.teamOf(r, id)),
       cue: r.cues.get(id)?.cue ?? null,
       res: null,
       safe: false,
@@ -1193,6 +1193,7 @@ export class RushShell {
       sip = this.lastResults.sip;
     }
     const wall = Date.now();
+    const team = r && r.parts.has(e.id) && (this.phase === 'count' || this.phase === 'play' || this.phase === 'results') ? this.teamOf(r, e.id) : undefined;
     const safe = (this.phase === 'intro' && this.safeNow && e.st === 'play') || wall < e.safeUntil;
     return {
       t: 'mg',
@@ -1210,13 +1211,25 @@ export class RushShell {
       touch: meta ? meta.touch : '',
       cd: this.phase === 'count' ? this.cd : 0,
       left: this.phase === 'play' && r ? Math.ceil(Math.max(0, r.duration - r.time)) : -1,
-      me: { st: e.st, name: e.name, emoji: e.emoji, color: e.color, pts: e.pts, rank, lead },
+      me: team === undefined ? { st: e.st, name: e.name, emoji: e.emoji, color: e.color, pts: e.pts, rank, lead } : { st: e.st, name: e.name, emoji: e.emoji, color: e.color, pts: e.pts, rank, lead, team },
       cue: live ? r!.cues.get(e.id)?.cue ?? null : null,
       res,
       safe,
       canNext: lead && this.canNext,
       sip,
     };
+  }
+
+  /** Team of a participant in a team minigame (never throws; a broken teamOf just shows no team). */
+  teamOf(r: RoundState, id: string): number | undefined {
+    const mg = r.mg;
+    if (!mg || !mg.teamOf) return undefined;
+    try {
+      const t = mg.teamOf(id);
+      return typeof t === 'number' && Number.isFinite(t) ? Math.max(0, Math.min(7, Math.round(t))) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Send every connected phone its message if it changed (JSON diff). Cheap enough to run per frame. */

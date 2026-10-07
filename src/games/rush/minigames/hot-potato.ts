@@ -379,6 +379,7 @@ export const hotPotato: MinigameDef = {
           const prog = hb ? progress(hb) : 0;
           const shake = hb ? Math.sin(t * 50 + s.idx) * (2 + prog * 6) : 0;
           const scorch = t - s.bangT < 1.2;
+          g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
           drawToken(g, s.p, s.x + shake, s.y, tokenR, {
             dim: !on,
             ring: hb ? PAL.bad : undefined,
