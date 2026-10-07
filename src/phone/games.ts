@@ -6,6 +6,7 @@ import { activeGame, state } from './store';
 export const FALLBACK_GAMES: GameInfo[] = [
   { id: 'kart', title: 'Kart Party', tagline: 'Drift, boost and bump to the finish line', emoji: '🏎️', color: '#ffb020', minPlayers: 1, maxPlayers: 4 },
   { id: 'smash', title: 'Smash Party', tagline: 'Knock your friends off the stage', emoji: '🥊', color: '#ff4d6d', minPlayers: 1, maxPlayers: 4 },
+  { id: 'rush', title: 'Party Rush', tagline: 'Fast motion minigames — jump in any time', emoji: '⚡', color: '#ffd23f', minPlayers: 1, maxPlayers: 16 },
 ];
 
 export function gameList(): GameInfo[] {
@@ -17,9 +18,15 @@ export function gameInfo(id: GameId): GameInfo {
   return gameList().find((g) => g.id === id) ?? FALLBACK_GAMES.find((g) => g.id === id) ?? FALLBACK_GAMES[0];
 }
 
+/** Every game except `id` (the results screen's "Switch Game" picker: one button each). */
+export function otherGames(id: GameId = activeGame()): GameInfo[] {
+  const list = gameList().length ? gameList() : FALLBACK_GAMES;
+  return list.filter((g) => g.id !== id);
+}
+
+/** @deprecated a blind cycle; use otherGames() (kept for older callers). */
 export function otherGame(id: GameId = activeGame()): GameId {
-  const list = gameList();
-  return list.find((g) => g.id !== id)?.id ?? (id === 'kart' ? 'smash' : 'kart');
+  return otherGames(id)[0]?.id ?? (id === 'kart' ? 'smash' : 'kart');
 }
 
 /** The current Smash setup (host's `gameSetup`, sanitised over the defaults). */

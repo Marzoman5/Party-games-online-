@@ -9,6 +9,7 @@ import {
   type InputPacket,
   type PhoneToHost,
   type ServerToPhone,
+  type StreamPacket,
 } from '../net/protocol';
 import { lsGet, lsSet } from './settings';
 import { setState, state } from './store';
@@ -79,7 +80,7 @@ export class Net {
   connect(room: string): void {
     this.halted = false;
     this.attempt = 0;
-    setState({ room, error: null, joined: false, phone: null, race: null, hostConnected: true });
+    setState({ room, error: null, joined: false, phone: null, race: null, rush: null, hostConnected: true });
     this.open();
   }
 
@@ -116,7 +117,7 @@ export class Net {
     }
   }
 
-  sendInput(p: InputPacket | FightInputPacket): boolean {
+  sendInput(p: InputPacket | FightInputPacket | StreamPacket): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && state.joined) {
       try {
         this.ws.send(JSON.stringify(p));

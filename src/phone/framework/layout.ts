@@ -13,7 +13,10 @@
 import type { GameId, PhoneFx } from '../../net/protocol';
 import type { View } from '../screens/view';
 
-export type LayoutId = 'kart' | 'fighter';
+export type LayoutId = 'kart' | 'fighter' | 'rush';
+
+/** How a layout wants the phone held: landscape (rotate overlay + landscape lock) or portrait (Party Rush). */
+export type LayoutOrientation = 'landscape' | 'portrait';
 
 /** The packet-sending side of a layout. */
 export interface InputDriver {
@@ -27,6 +30,8 @@ export interface InputDriver {
 export interface ControllerLayout extends View {
   readonly id: LayoutId;
   readonly input: InputDriver;
+  /** Grip of this layout (default 'landscape': the App shows "rotate your phone" when held upright). */
+  readonly orientation?: LayoutOrientation;
   /** Recompute thumb-friendly positions (resize, settings change). */
   layout(): void;
   /** One-shot host feedback (haptics + flashes). */
@@ -36,6 +41,7 @@ export interface ControllerLayout extends View {
 export const LAYOUT_FOR_GAME: Record<GameId, LayoutId> = {
   kart: 'kart',
   smash: 'fighter',
+  rush: 'rush',
 };
 
 export function layoutForGame(game: GameId | string | undefined | null): LayoutId {

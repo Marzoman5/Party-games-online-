@@ -12,6 +12,9 @@ import { net, normalizeRoom } from './net';
 import { settings, setSetting, type PhoneSettings } from './settings';
 import { activeGame, currentView, state } from './store';
 import { tilt } from './tilt';
+import { motion, type RawMotion } from './motion/index';
+import type { RushEvent } from '../net/protocol';
+import { noteInjected, rush, touchMode } from './rush/runtime';
 
 const root = document.getElementById('phone-app') ?? document.body.appendChild(document.createElement('div'));
 const app = new App(root);
@@ -21,6 +24,12 @@ declare global {
     __phone?: {
       getState(): unknown;
       setSetting(k: string, v: unknown): void;
+      /** PARTY RUSH: drive the motion API without sensors (tests / bots). */
+      motion: {
+        inject(raw: Partial<RawMotion>): void;
+        gesture(k: RushEvent, v?: number, x?: number, y?: number): void;
+        state(): unknown;
+      };
     };
   }
 }
@@ -50,7 +59,33 @@ window.__phone = {
       fightPackets: fightControls.sent,
       tilt: { active: tilt.active, raw: tilt.raw, offset: tilt.offset },
       settings: { ...settings },
+      // PARTY RUSH
+      rush: state.rush,
+      rushTouch: touchMode(),
+      rushTapped: rush.tapped,
+      rushSent: { stream: rush.sent.stream, act: rush.sent.act, here: rush.sent.here, away: rush.sent.away, mode: rush.sent.mode, next: rush.sent.next, events: { ...rush.sent.events } },
     };
+  },
+  motion: {
+    inject(raw: Partial<RawMotion>) {
+      motion.inject(raw);
+      noteInjected();
+    },
+    gesture(k: RushEvent, v?: number, x?: number, y?: number) {
+      motion.injectGesture(k, v, x, y);
+      noteInjected();
+    },
+    state() {
+      return {
+        supported: motion.supported,
+        enabled: motion.enabled,
+        hasData: motion.hasData,
+        sample: motion.sample(),
+        motionOk: rush.motionOk,
+        manualTouch: rush.manualTouch,
+        touch: touchMode(),
+      };
+    },
   },
   setSetting(k: string, v: unknown) {
     setSetting(k as keyof PhoneSettings, v as never);

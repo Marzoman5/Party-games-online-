@@ -1,5 +1,5 @@
 /** Tiny observable app store: connection + latest host snapshots. */
-import type { GameId, PhoneFightStatus, PhoneRaceStatus, PhoneState, ServerError } from '../net/protocol';
+import type { GameId, PhoneFightStatus, PhoneRaceStatus, PhoneState, RushPhoneMsg, ServerError } from '../net/protocol';
 
 export type ConnPhase = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -23,6 +23,10 @@ export interface AppState {
   /** PARTY HUB: last Smash Party fight status (`t:'fight'`). */
   fight: PhoneFightStatus | null;
   fightAt: number;
+  /** PARTY RUSH: last minigame-channel view of this phone (`t:'mg'`). */
+  rush: RushPhoneMsg | null;
+  /** performance.now() when `rush` arrived. */
+  rushAt: number;
 }
 
 export const state: AppState = {
@@ -38,6 +42,8 @@ export const state: AppState = {
   raceAt: 0,
   fight: null,
   fightAt: 0,
+  rush: null,
+  rushAt: 0,
 };
 
 type Listener = (changed: Partial<AppState>) => void;
@@ -78,5 +84,5 @@ export function currentView(): ViewId {
 /** The active game (PARTY HUB `PhoneState.game`; a pre-hub host = kart). */
 export function activeGame(): GameId {
   const g = state.phone?.game;
-  return g === 'smash' ? 'smash' : 'kart';
+  return g === 'smash' || g === 'rush' ? g : 'kart';
 }

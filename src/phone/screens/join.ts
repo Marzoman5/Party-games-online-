@@ -87,6 +87,9 @@ export class JoinView implements View {
   }
 }
 
+/** `ServerError.message` marker for a player who tapped "Leave party" (not kicked by the host). */
+export const LEFT_BY_CHOICE = 'left';
+
 export class ErrorView implements View {
   readonly el: HTMLElement;
   private icon: HTMLElement;
@@ -117,7 +120,8 @@ export class ErrorView implements View {
       location.reload();
       return;
     }
-    if (code === 'kicked') lsSet(tokenKey(state.room), null);
+    // Leaving by choice (Party Rush corner menu) keeps the seat token so the score comes back with you.
+    if (code === 'kicked' && state.error?.message !== LEFT_BY_CHOICE) lsSet(tokenKey(state.room), null);
     net.retry();
   }
 
@@ -129,9 +133,9 @@ export class ErrorView implements View {
     let text = e?.message || '';
     let retry = 'Try again';
     if (code === 'room_full') {
-      icon = '🚗🚗🚗🚗';
+      icon = '🎉🎉🎉';
       title = 'This party is full';
-      text = 'Up to 4 racers can play at once. Try again when someone leaves.';
+      text = 'Up to 16 players can join at once. Try again when someone leaves.';
     } else if (code === 'bad_version') {
       icon = '🔄';
       title = 'Update needed';
@@ -140,7 +144,7 @@ export class ErrorView implements View {
     } else if (code === 'kicked') {
       icon = '👋';
       title = 'You left the party';
-      text = 'You were removed from this room.';
+      text = e?.message === LEFT_BY_CHOICE ? 'See you soon! Tap below to jump back in.' : 'You were removed from this room.';
       retry = 'Join again';
     }
     setText(this.icon, icon);

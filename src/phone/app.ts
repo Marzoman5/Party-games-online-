@@ -11,7 +11,8 @@ import { profileOnJoined, profileOnState } from './profile';
 import { onSettings, settings } from './settings';
 import { activeGame, currentView, setState, state, subscribe, type ViewId } from './store';
 import { tilt } from './tilt';
-import { requestFullscreen, requestWakeLock, setWantLandscape } from './system';
+import { requestFullscreen, requestWakeLock, setWantOrientation } from './system';
+import { RushView } from './rush/RushView';
 import { button, h, setText, show, toggleClass } from './ui';
 import { ByGameView } from './screens/byGame';
 import { ControllerView } from './screens/controller';
@@ -34,6 +35,7 @@ const CLEAR_RACE_ON: string[] = ['loading', 'lobby', 'setup', 'tutorial', 'title
 const LAYOUT_FACTORIES: Record<LayoutId, () => ControllerLayout> = {
   kart: () => new ControllerView(),
   fighter: () => new FighterView(),
+  rush: () => new RushView(),
 };
 
 export class App {
@@ -129,6 +131,7 @@ export class App {
         if (prevGame !== m.game) {
           patch.race = null;
           patch.fight = null;
+          if (prevGame === 'rush' || m.game === 'rush') patch.rush = null;
         }
         profileOnState(m);
         setState(patch);
@@ -142,6 +145,10 @@ export class App {
         break;
       case 'fx':
         this.getLayout(layoutForGame(activeGame())).fx(m);
+        break;
+      case 'mg':
+        // PARTY RUSH: the whole per-phone view (phase, cue, me…). Layout reads it from the store.
+        setState({ rush: m, rushAt: performance.now() });
         break;
       default:
         break;
@@ -182,16 +189,19 @@ export class App {
       view.enter?.(v);
       this.currentId = null;
     }
-    if (this.currentId !== v) {
+    const grip = isCtl ? ((view as ControllerLayout).orientation ?? 'landscape') : null;
+    if (this.currentId !== v || this.grip !== grip) {
       this.currentId = v;
-      setWantLandscape(isCtl);
+      this.grip = grip;
+      // Landscape layouts lock landscape; a portrait layout (Party Rush) locks portrait; menus keep the lock.
+      setWantOrientation(grip);
       if (!isCtl) this.releaseAll();
     }
     view.update(v);
 
     for (const l of this.layouts.values()) l.input.setActive(isCtl && state.joined && l === view);
     const portrait = window.innerHeight > window.innerWidth * 1.05;
-    const rotateOn = isCtl && portrait;
+    const rotateOn = grip === 'landscape' && portrait;
     if (rotateOn && this.rotate.style.display === 'none') this.releaseAll();
     show(this.rotate, rotateOn);
     toggleClass(this.root, 'in-race', isCtl);
@@ -263,7 +273,8 @@ export class App {
       if (CONTROLLER_VIEWS.includes(currentView()) || currentView() === 'loading') requestFullscreen();
       else if (!this.firstTapDone) requestFullscreen();
       this.firstTapDone = true;
-      if (settings.tilt && !tilt.active) {
+      // Party Rush asks for motion permission itself (its join tap): never race two iOS prompts.
+      if (settings.tilt && !tilt.active && activeGame() !== 'rush') {
         void tilt.enable().then((ok) => {
           if (ok) setTimeout(() => tilt.hasData && tilt.offset === 0 && tilt.calibrate(), 400);
         });
@@ -281,4 +292,5 @@ export class App {
   }
 
   private firstTapDone = false;
+  private grip: 'landscape' | 'portrait' | null = null;
 }
