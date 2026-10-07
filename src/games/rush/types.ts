@@ -172,6 +172,8 @@ export interface Minigame {
   done(): boolean;
   /** Final ranking (called exactly once, after done() or at the time cap). */
   results(): MinigameResult;
+  /** Team minigames: the player's team (0 = red, 1 = blue) → shown on the phone as `me.team`. */
+  teamOf?(id: string): number | undefined;
   /** Host-side solo bots: hint numbers for this player's bot brain (e.g. target direction). */
   botHint?(id: string): number[] | undefined;
   dispose?(): void;

@@ -264,3 +264,9 @@ Durations are hard caps per heat [1,2,3] (seconds). "Scale" = behaviour at 1 / 2
 ## Contract additions log
 
 (append here: who, what, why)
+- LEAD: `Minigame.teamOf?(id)` (optional) — team minigames report each player's team; the SHELL puts it in
+  `RushPhoneMsg.me.team`. Requested by MG3 (Tug of War).
+- LEAD (MG3 notes for PHONE): cue updates with `fire:false` (same id, new `word`/`v`) must re-render the
+  phone without re-firing the triple cue; `flick`/`tap`/`pose` events must carry `ms` + `c` whenever a cue
+  is up; the `pose` stream must keep reporting the held pose (Copy the Pose relies on it when the player
+  already holds the target pose).
