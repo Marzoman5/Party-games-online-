@@ -51,6 +51,10 @@ export class HostUI {
   private readonly replaced: HTMLDivElement;
   private readonly loadingGame: HTMLDivElement;
   private readonly loadingGameText = h('span');
+  /** "👀 watching this one" chip (Kart/Smash with more players than seats). */
+  private readonly watchChip = h('div', { class: 'kp-watch-chip', 'data-testid': 'watch-chip' });
+  private watchShownAt = 0;
+  private watchKey = '';
   private renderQueued = 0;
   private bannerSince = 0;
 
@@ -96,6 +100,7 @@ export class HostUI {
     // Lazy game engine loading (game switch).
     this.loadingGame = h('div', { class: 'kp-banner kp-banner-game', 'data-testid': 'game-loading' }, h('span', 'kp-spinner'), this.loadingGameText);
     this.root.appendChild(this.loadingGame);
+    this.root.appendChild(this.watchChip);
 
     // "Opened in another tab" blocker.
     this.replaced = h(
@@ -178,6 +183,7 @@ export class HostUI {
     setText(this.bannerText, 'Reconnecting to game server…');
     toggle(this.replaced, 'kp-on', s.netStatus === 'replaced');
     toggle(this.loadingGame, 'kp-on', !!s.switching);
+    this.renderWatchChip(s);
     if (s.switching) setText(this.loadingGameText, `Loading ${s.modules[s.switching].info.title}…`);
 
     // Cursor: hidden while the engine is loading / flying in / counting down / playing.
@@ -188,6 +194,36 @@ export class HostUI {
       racingish = false;
     }
     d.setCursorHidden(racingish && (s.screen === 'race' || s.screen === 'loading' || s.soloActive));
+  }
+
+  /**
+   * Kart/Smash seat at most `maxPlayers`: say clearly who watches this one. Always on setup/results;
+   * during loading/race only for the first seconds (it must not cover the race HUD).
+   */
+  private renderWatchChip(s: PartySession): void {
+    const mod = s.game;
+    let names: string[] = [];
+    if (!mod.dropIn && !s.soloActive) {
+      if (s.screen === 'setup') {
+        const ready = s.connectedPlayers.filter((p) => p.ready && !p.late).sort((a, b) => a.joinSeq - b.joinSeq);
+        names = ready.slice(mod.info.maxPlayers).map((p) => p.name);
+      } else if (s.screen === 'loading' || s.screen === 'race' || s.screen === 'results' || s.screen === 'paused') {
+        names = s.watchers.map((p) => p.name);
+      }
+    }
+    const key = names.join('|');
+    if (key !== this.watchKey) {
+      this.watchKey = key;
+      this.watchShownAt = performance.now();
+      if (names.length) {
+        const list = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
+        setText(this.watchChip, `👀 ${mod.info.maxPlayers} play ${mod.info.title} at once · watching this one: ${list}`);
+        window.setTimeout(() => this.render(), 8200);
+      }
+    }
+    const inRace = s.screen === 'loading' || s.screen === 'race';
+    const on = names.length > 0 && (!inRace || performance.now() - this.watchShownAt < 8000);
+    toggle(this.watchChip, 'kp-on', on);
   }
 
   private viewFor(screen: ScreenId, s: PartySession): ViewKey {

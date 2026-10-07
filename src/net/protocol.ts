@@ -16,13 +16,46 @@
 export const WS_PATH = '/ws';
 export const DEFAULT_PORT = 3000;
 export const DEFAULT_HTTPS_PORT = 3443;
-export const MAX_PLAYERS = 4;
+/**
+ * PARTY RUSH: room-level cap on players (connected seats). Kart Party and Smash Party still seat at most
+ * MAX_MATCH_PLAYERS (per-game `GameInfo.maxPlayers`); the rest watch that match.
+ */
+export const MAX_PLAYERS = 16;
+/** Kart / Smash seats per match (the first players by join order play, the rest watch). */
+export const MAX_MATCH_PLAYERS = 4;
 /** Room codes: 4 uppercase letters, no I/O to avoid confusion with 1/0. */
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const PROTOCOL_VERSION = 1;
 
-/** Kart/team colours by player slot (CSS hex). Phone background tint + host labels. */
-export const SLOT_COLORS = ['#ff4d4d', '#3d8bff', '#3ddc5a', '#ffc21a'] as const;
+/**
+ * Player colours by lobby slot (CSS hex). Phone background tint + host labels. The first 4 are the
+ * original kart colours; PARTY RUSH adds 12 more, ordered so neighbours stay well separated in hue and
+ * lightness (players are ALSO identified by emoji + name everywhere, never colour alone).
+ */
+export const SLOT_COLORS = [
+  '#ff4d4d', // red
+  '#3d8bff', // blue
+  '#3ddc5a', // green
+  '#ffc21a', // yellow
+  '#c86bff', // purple
+  '#ff8a1f', // orange
+  '#1fd6d0', // teal
+  '#ff5fb8', // pink
+  '#9be03a', // lime
+  '#8d6bff', // indigo
+  '#ffffff', // white
+  '#d98a4e', // tan
+  '#5fd0ff', // sky
+  '#e8d27a', // sand
+  '#ff9f9f', // salmon
+  '#a8b8e0', // periwinkle
+] as const;
+
+/** PARTY RUSH: one unique emoji per player (animals/food), assigned on join. */
+export const PLAYER_EMOJIS = [
+  '🐸', '🦊', '🐼', '🐙', '🦄', '🐔', '🐧', '🦁', '🐷', '🐵', '🐢', '🦀', '🐝', '🦉', '🐳', '🦖',
+  '🍕', '🌮', '🍩', '🍉', '🥑', '🍔', '🧁', '🍌',
+] as const;
 
 // ---------------------------------------------------------------------------
 // Input packet (phone -> server -> host). Sent ~60 Hz while in race/tutorial,
@@ -207,6 +240,8 @@ export interface LobbyPlayer {
   tutorialDone: boolean;
   /** PARTY HUB: team (0 = red, 1 = blue) for team modes. Always present from the hub host. */
   team?: number;
+  /** PARTY RUSH: the player's emoji (unique in the party). Always present from the hub host. */
+  emoji?: string;
 }
 
 export interface RaceSetup {
@@ -269,14 +304,21 @@ export interface PhoneState {
   sandbox?: { done: string[] } | null;
   /** Extra result info for the active game. */
   resultsInfo?: { game: GameId; winner: string; winnerTeam?: number; mode?: string } | null;
+  /**
+   * PARTY RUSH: why this phone is not playing the running Kart/Smash match: 'full' = the match seats only
+   * the first `maxPlayers` by join order ("watching this one"), 'late' = joined after it started.
+   */
+  watch?: 'full' | 'late' | null;
+  /** PARTY RUSH: the host runs in secure (HTTPS) mode, so motion sensors can work. */
+  secure?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // PARTY HUB — multi-game additions (all additive).
 // ---------------------------------------------------------------------------
 
-export type GameId = 'kart' | 'smash';
-export const GAME_IDS: readonly GameId[] = ['kart', 'smash'];
+export type GameId = 'kart' | 'smash' | 'rush';
+export const GAME_IDS: readonly GameId[] = ['kart', 'smash', 'rush'];
 
 export interface GameInfo {
   id: GameId;
@@ -464,7 +506,153 @@ export interface PhoneFx {
   strength?: number;
 }
 
-export type HostToPhone = PhoneState | PhoneRaceStatus | PhoneFx | PhoneFightStatus;
+// ---------------------------------------------------------------------------
+// PARTY RUSH — the generic minigame channel (all additive). See docs/PARTY_RUSH_CONTRACT.md.
+// ---------------------------------------------------------------------------
+
+/** Continuous phone sensor streams a minigame can ask for (20 Hz, tag-2 packets). */
+export type RushStream = 'shake' | 'tilt' | 'still' | 'pose' | 'aim' | 'pitch';
+/** Discrete gesture events a minigame can ask for (`{t:'mg'}` phone→host). */
+export type RushEvent = 'flick' | 'raise' | 'pose' | 'tap';
+/** Gesture demo animation ids (intro card on the TV + the phone mirror). */
+export type RushDemo = 'shake' | 'tilt' | 'flick' | 'yank' | 'still' | 'raise' | 'pose' | 'aim' | 'cast';
+/** Loop phase as the phone sees it. */
+export type RushPhase = 'lobby' | 'intro' | 'count' | 'play' | 'results' | 'paused';
+/**
+ * This phone's status: 'new' = connected, has not done the join tap yet; 'play' = in the current
+ * minigame; 'next' = joined/returned mid-round, plays from the next minigame; 'away' = idle/hidden, tap to return.
+ */
+export type RushMe = 'new' | 'play' | 'next' | 'away';
+/** Triple-cue style (full-screen flash colour + sound + vibration) fired once when a cue id changes. */
+export type RushFx = 'none' | 'go' | 'good' | 'bad' | 'buzz' | 'boom' | 'tick' | 'win';
+
+/** Pose indices (Copy the Pose / pose stream), from gravity only. */
+export const RUSH_POSES = ['faceUp', 'faceDown', 'upright', 'upsideDown', 'leftEdge', 'rightEdge'] as const;
+export type RushPose = (typeof RUSH_POSES)[number];
+
+/** A per-player cue on the phone. A NEW `id` fires the triple cue once and restarts the phone's reaction timer. */
+export interface RushCue {
+  id: number;
+  fx: RushFx;
+  /** Giant word shown instead of `word` while this cue is up ('DRAW!', 'YANK!', 'OUT'). */
+  word?: string;
+  /** Full-screen background colour while the cue is up (absent = the player's colour). */
+  bg?: string;
+  /** Special phone visual: 'bomb' (Hot Potato holder), 'pose' (target pose = v), 'fish' (on the hook). */
+  show?: 'bomb' | 'pose' | 'fish';
+  /** 0..1 intensity (bomb pulse/tick speed) or the pose index for show:'pose'. */
+  v?: number;
+  /** Bot-only hints (ignored by the phone UI). Keep tiny. */
+  hint?: number[];
+}
+
+/** Host → phone: the whole Party Rush view of one phone (sent when it changes; always < 1 KB). */
+export interface RushPhoneMsg {
+  t: 'mg';
+  ph: RushPhase;
+  /** Round id: bumps on every minigame start. Phone events + stream packets carry it; stale ones are dropped. */
+  rid: number;
+  /** Rounds played so far (1-based round number of the current/next minigame). */
+  round: number;
+  heat: number;
+  /** Minigame id ('' between minigames). */
+  g: string;
+  name: string;
+  /** One-line instruction (≤ ~8 words). */
+  instr: string;
+  demo: RushDemo | '';
+  /** The giant word during play ('SHAKE!'). */
+  word: string;
+  /** What the phone must detect during 'count' + 'play' (detectors calibrate at GO). */
+  s: RushStream | null;
+  ev: RushEvent[];
+  /** What a touch-fallback player does ('Mash the button!'). */
+  touch: string;
+  /** Countdown during ph:'count' (3,2,1, then 0 = GO). */
+  cd: number;
+  /** Whole seconds left in ph:'play' (-1 = n/a). */
+  left: number;
+  me: {
+    st: RushMe;
+    name: string;
+    emoji: string;
+    color: string;
+    /** All-time points. */
+    pts: number;
+    /** Scoreboard rank (1-based, 0 = unranked). */
+    rank: number;
+    /** Party leader (may press NEXT). */
+    lead: boolean;
+    /** Team (team minigames only). */
+    team?: number;
+  };
+  cue: RushCue | null;
+  /** This player's round result (ph:'results'). */
+  res: { place: number; pts: number; line: string } | null;
+  /** Show the "Hold your phone tight!" card. */
+  safe: boolean;
+  /** The leader's NEXT button is live. */
+  canNext: boolean;
+  /** Sip mode line for the round results ('' = none). */
+  sip: string;
+}
+
+/** Phone → host minigame message (relayed like every PhoneToHost control message). */
+export interface MgFromPhone {
+  t: 'mg';
+  /**
+   * 'here' = the join / come-back tap; 'away' = tab hidden; 'next' = leader NEXT; 'mode' = sensors (v=1) or
+   * touch fallback (v=0); 'act' = activity heartbeat (≤ 1/s while the phone is hand-held or touched);
+   * 'flick' | 'raise' | 'pose' | 'tap' = gesture events.
+   */
+  k: 'here' | 'away' | 'next' | 'mode' | 'act' | RushEvent;
+  /** Round id from the latest RushPhoneMsg (ignored for here/away/next/mode). */
+  rid: number;
+  /** flick: strength 0..100; pose: pose index; mode: 1 sensors, 0 touch. */
+  v?: number;
+  /** flick direction, screen coords -100..100 (x right, y up). */
+  x?: number;
+  y?: number;
+  /** Reaction time measured ON THE PHONE: ms since cue `c` arrived (only when a cue is up). */
+  ms?: number;
+  /** The cue id `ms` refers to. */
+  c?: number;
+}
+
+// ----- Party Rush stream packet (phone -> server -> host) -----------------
+// Phone sends:   [2, seq, rid, a, b, c]           (20 Hz, only while a minigame asks for a stream)
+// Server relays: [2, seq, rid, a, b, c, playerId]
+//   a, b, c   ints -1000..1000, meaning depends on RushPhoneMsg.s:
+//     shake  a = shake energy 0..1000, b = shakes counted since GO (0..1000), c = 0
+//     tilt   a = right tilt, b = forward tilt (±1000 ≈ ±30° from the neutral captured at GO), c = 0
+//     still  a = movement right now 0..1000, b = 1 if the phone looks like it rests on a table, c = accumulated movement since GO 0..1000
+//     pose   a = stable pose index (RUSH_POSES, -1 none), b = confidence 0..1000, c = 0
+//     aim    a = x, b = y (±1000 = edge of the board; gyro-integrated, re-centred at each dart / double tap), c = 0
+//     pitch  a = pitch in tenths of a degree (-900 = top edge pointing at the floor, 0 = level, 900 = up), b = c = 0
+export type StreamPacket = [2, number, number, number, number, number];
+export type RelayedStreamPacket = [2, number, number, number, number, number, string];
+
+export interface DecodedStream {
+  seq: number;
+  rid: number;
+  a: number;
+  b: number;
+  c: number;
+}
+
+export function encodeStream(seq: number, rid: number, a: number, b: number, c: number): StreamPacket {
+  const k = (v: number): number => Math.round(Math.max(-1000, Math.min(1000, Number.isFinite(v) ? v : 0)));
+  return [2, seq | 0, rid | 0, k(a), k(b), k(c)];
+}
+
+export function decodeStream(p: readonly unknown[]): DecodedStream | null {
+  if (!Array.isArray(p) || p[0] !== 2 || p.length < 6) return null;
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const k = (v: unknown): number => Math.max(-1000, Math.min(1000, n(v)));
+  return { seq: n(p[1]), rid: n(p[2]), a: k(p[3]), b: k(p[4]), c: k(p[5]) };
+}
+
+export type HostToPhone = PhoneState | PhoneRaceStatus | PhoneFx | PhoneFightStatus | RushPhoneMsg;
 
 export type PhoneToHost =
   | { t: 'profile'; name: string; characterId: string }
@@ -486,9 +674,11 @@ export type PhoneToHost =
   | { t: 'game'; game: GameId } // leader picks the active game (lobby / setup / results)
   | { t: 'gsetup'; setup: Record<string, unknown> } // leader edits the active game's setup (smash: Partial<SmashSetup>)
   | { t: 'team'; team: number } // a player picks their team (team modes)
-  | { t: 'practice_done' }; // sandbox: "I'm ready" (leaves the practice)
+  | { t: 'practice_done' } // sandbox: "I'm ready" (leaves the practice)
+  // ----- PARTY RUSH additions -----
+  | MgFromPhone;
 
 export type ServerToHost = HostWelcome | PlayerJoined | PlayerLeft | FromPhone | ServerError | Pong;
 export type ServerToPhone = PhoneWelcome | ServerError | Pong | HostStatus | HostToPhone;
 export type HostToServer = HostHello | HostSend | HostKick | Ping;
-export type PhoneToServer = PhoneHello | Ping | PhoneToHost | InputPacket | FightInputPacket;
+export type PhoneToServer = PhoneHello | Ping | PhoneToHost | InputPacket | FightInputPacket | StreamPacket;

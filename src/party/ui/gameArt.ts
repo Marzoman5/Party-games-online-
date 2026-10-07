@@ -15,6 +15,24 @@ export function gameLogoMarkup(info: GameInfo): string {
 
 /** Decorative background art for a game card. */
 export function gameCardArt(id: string): string {
+  if (id === 'rush') {
+    return `<svg class="kp-gart" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="10" y="100" width="180" height="10" rx="5" fill="#120a2e" opacity=".55"/>
+      <polygon points="104,6 70,64 96,64 82,114 132,48 104,48 120,6" fill="#ffd23f" stroke="#120a2e" stroke-width="5" stroke-linejoin="round"/>
+      <g transform="translate(26 30) rotate(-14)">
+        <rect x="0" y="0" width="30" height="54" rx="7" fill="#120a2e"/>
+        <rect x="4" y="6" width="22" height="40" rx="3" fill="#3ddc5a"/>
+        <text x="15" y="31" text-anchor="middle" font-size="14">🐸</text>
+      </g>
+      <g transform="translate(146 24) rotate(16)">
+        <rect x="0" y="0" width="30" height="54" rx="7" fill="#120a2e"/>
+        <rect x="4" y="6" width="22" height="40" rx="3" fill="#3d8bff"/>
+        <text x="15" y="31" text-anchor="middle" font-size="14">🦊</text>
+      </g>
+      <path d="M14 40 q-8 10 0 20 M8 34 q-12 16 0 32" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" opacity=".8"/>
+      <path d="M186 34 q8 10 0 20 M192 28 q12 16 0 32" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" opacity=".8"/>
+    </svg>`;
+  }
   if (id === 'smash') {
     return `<svg class="kp-gart" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <polygon points="100,8 114,42 152,30 128,60 170,74 124,80 136,114 100,90 64,114 76,80 30,74 72,60 48,30 86,42" fill="#ffd23f" stroke="#120a2e" stroke-width="5" stroke-linejoin="round"/>

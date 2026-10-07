@@ -11,6 +11,7 @@ import type { ScreenView, UiContext } from '../../../party/ui/HostUI';
 import { avatarSvg } from '../../../party/ui/avatar';
 import { button, esc, h, setText, toggle } from '../../../party/ui/dom';
 import { getCharacter } from '../../../kart/roster';
+import { SwitchPicker } from '../../../party/ui/switchPicker';
 
 const PODIUM_ORDER = [1, 0, 2]; // 2nd, 1st, 3rd
 
@@ -23,7 +24,7 @@ export class KartResultsOverlay implements ScreenView {
   private readonly who = h('div', 'kp-results-who');
   private readonly confetti = h('div', 'kp-confetti');
   private readonly nextBtn: HTMLButtonElement;
-  private readonly switchBtn: HTMLButtonElement;
+  private readonly switcher: SwitchPicker;
   private shown: ResultsState | null = null;
 
   constructor(
@@ -32,7 +33,7 @@ export class KartResultsOverlay implements ScreenView {
   ) {
     const s = ctx.session;
     this.nextBtn = button('Next ▶', 'kp-primary', () => s.hostPost('next'), 'btn-next');
-    this.switchBtn = button('Switch game', 'kp-switch', () => s.hostPost('switch'), 'btn-switch');
+    this.switcher = new SwitchPicker(s);
     for (let i = 0; i < 36; i++) {
       const c = h('i');
       c.style.setProperty('--x', `${Math.random() * 100}%`);
@@ -62,7 +63,7 @@ export class KartResultsOverlay implements ScreenView {
             this.nextBtn,
             button('↻ Replay', '', () => s.hostPost('replay'), 'btn-replay'),
             button('Change track', '', () => s.hostPost('track'), 'btn-track'),
-            this.switchBtn,
+            this.switcher.root,
             button('Lobby', '', () => s.hostPost('lobby'), 'btn-lobby'),
           ),
         ),
@@ -84,9 +85,7 @@ export class KartResultsOverlay implements ScreenView {
       this.nextBtn.innerHTML = `Next track ▶ <small>${esc(TRACKS[(i + 1) % TRACKS.length].name)}</small>`;
     }
     toggle(this.root, 'kp-final', final);
-    const other = s.otherGame();
-    toggle(this.switchBtn, 'kp-hidden', !other);
-    if (other) this.switchBtn.innerHTML = `${s.modules[other].info.emoji} Play ${esc(s.modules[other].info.title)}`;
+    this.switcher.update();
     if (r === this.shown) return;
     this.shown = r;
 

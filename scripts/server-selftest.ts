@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
-import { PROTOCOL_VERSION, WS_PATH, type HostWelcome, type ServerToHost } from '../src/net/protocol';
+import { MAX_PLAYERS, PROTOCOL_VERSION, WS_PATH, type HostWelcome, type ServerToHost } from '../src/net/protocol';
 import { startServer } from '../server/app';
 import { BotConnectError, BotPhone } from './bots';
 
@@ -207,11 +207,18 @@ async function main(): Promise<void> {
     a.send([1, 78, 1, 2, 3, 4, 5, 6] as unknown[]); // too short
     a.send([1, 79, 1, 2, 3, 4, 5, 6, 'x'] as unknown[]); // non-numeric
     a.send([1, 80, 1, 2, 3, NaN, 5, 6, 7] as unknown[]); // NaN -> null in JSON
-    a.send([2, 81, 1, 2, 3, 4, 5, 6, 7] as unknown[]); // unknown tag
+    a.send([3, 81, 1, 2, 3, 4, 5, 6, 7] as unknown[]); // unknown tag
+    a.send([2, 83, 1, 2, 3] as unknown[]); // rush stream too short
+    a.send([2, 84, 1, 'x', 3, 4] as unknown[]); // rush stream non-numeric
     a.send([0, 82, 10, 100, 0, 1, 3] as unknown[]); // kart packet still relays (marker)
     const kartAfter = await host.next<unknown[]>((m) => Array.isArray(m) && m[0] === 0 && m[1] === 82, 2000, 'kart marker', mark);
     ok(JSON.stringify(kartAfter) === JSON.stringify([0, 82, 10, 100, 0, 1, 3, 'p1']), 'tag 0 kart packet unchanged');
-    ok(!host.msgs.slice(mark).some((m) => Array.isArray(m) && [78, 79, 80, 81].includes(m[1] as number)), 'malformed / unknown-tag packets dropped');
+    ok(!host.msgs.slice(mark).some((m) => Array.isArray(m) && [78, 79, 80, 81, 83, 84].includes(m[1] as number)), 'malformed / unknown-tag packets dropped');
+    // PARTY RUSH: tag-2 stream packets relay as [2, seq, rid, a, b, c, playerId] (extra fields dropped).
+    mark = host.msgs.length;
+    a.send([2, 85, 3, 400, -250, 1000, 'spoofed'] as unknown[]);
+    const rush = await host.next<unknown[]>((m) => Array.isArray(m) && m[0] === 2 && m[1] === 85, 2000, 'rush stream packet', mark);
+    ok(JSON.stringify(rush) === JSON.stringify([2, 85, 3, 400, -250, 1000, 'p1']), `rush stream relayed as [2..5, playerId] ${JSON.stringify(rush)}`);
     // Hot path ordering: fight packets arrive in send order, immediately.
     mark = host.msgs.length;
     for (let i = 0; i < 50; i++) a.send([1, 1000 + i, 0, 0, 0, 0, 0, 0, 0] as unknown[]);
@@ -226,6 +233,7 @@ async function main(): Promise<void> {
       ['practice_done', () => a.practiceDone(), () => true],
       ['post', () => a.post('switch', 'kart'), (m) => m.action === 'switch' && m.game === 'kart'],
       ['post', () => a.post('switch'), (m) => m.action === 'switch' && m.game === undefined],
+      ['mg', () => a.send({ t: 'mg', k: 'flick', rid: 4, v: 60, x: 10, y: -5, ms: 312, c: 9 }), (m) => m.k === 'flick' && m.ms === 312],
     ];
     for (const [t, sendIt, check] of hubMsgs) {
       mark = host.msgs.length;
@@ -345,30 +353,38 @@ async function main(): Promise<void> {
     await sleep(100);
     ok(!host.msgs.slice(mark).some(isT('p_leave')), 'no p_leave when a socket is replaced');
 
-    // ---- capacity
+    // ---- capacity (PARTY RUSH: 16 connected phones per room; 4 → 16 is the only change)
     console.log('Capacity');
     const c = await BotPhone.connect(base, room);
     const d = await BotPhone.connect(base, room);
     bots.push(c, d);
     ok(c.playerId === 'p3' && d.playerId === 'p4', `p3/p4 joined (${c.playerId}, ${d.playerId})`);
-    await expectReject(BotPhone.connect(base, room), 'room_full', '5th phone');
+    const more: BotPhone[] = [];
+    for (let i = 5; i <= MAX_PLAYERS; i++) more.push(await BotPhone.connect(base, room));
+    bots.push(...more);
+    ok(more.length === MAX_PLAYERS - 4 && more[more.length - 1].playerId === `p${MAX_PLAYERS}`, `p5..p${MAX_PLAYERS} joined (${more.length} more)`);
+    await expectReject(BotPhone.connect(base, room), 'room_full', `${MAX_PLAYERS + 1}th phone`);
     d.disconnect();
     await host.next(isT('p_leave', (m) => m.p === 'p4'), 2000, 'p_leave p4');
     const e = await BotPhone.connect(base, room);
     bots.push(e);
-    ok(e.playerId === 'p5' && !e.rejoin, `new phone evicts stale seat -> ${e.playerId}`);
+    const eId = `p${MAX_PLAYERS + 1}`;
+    ok(e.playerId === eId && !e.rejoin, `new phone evicts stale seat -> ${e.playerId}`);
     await expectReject(BotPhone.connect(base, room, d.token), 'room_full', 'evicted token cannot reclaim while full');
     const seats = (await (await fetch(`${base}/api/debug/rooms`)).json()) as { room: string; players: { playerId: string }[] }[];
-    ok(seats.find((r) => r.room === room)?.players.map((p) => p.playerId).join(',') === 'p1,p2,p3,p5', 'seats are p1,p2,p3,p5');
+    const expectSeats = ['p1', 'p2', 'p3', ...more.map((b) => b.playerId), eId].join(',');
+    ok(seats.find((r) => r.room === room)?.players.map((p) => p.playerId).join(',') === expectSeats, `seats are p1,p2,p3,p5..${eId}`);
+    for (const b of more) b.disconnect();
 
     // ---- kick
     console.log('Kick');
-    host.send({ t: 'kick', p: 'p5' });
+    host.send({ t: 'kick', p: eId });
     await e.waitFor((x) => x.closeCode !== null, 2000, 'kick close');
     ok(e.lastError?.code === 'kicked' && e.closeCode === 4002, `kicked phone got error+close (${e.lastError?.code}, ${e.closeCode})`);
     const e2 = await BotPhone.connect(base, room, e.token);
     bots.push(e2);
-    ok(!e2.rejoin && e2.playerId === 'p6', `kicked token is forgotten -> new seat ${e2.playerId}`);
+    const e2Id = `p${MAX_PLAYERS + 2}`;
+    ok(!e2.rejoin && e2.playerId === e2Id, `kicked token is forgotten -> new seat ${e2.playerId}`);
 
     // ---- host reclaim
     console.log('Host reclaim');
@@ -377,7 +393,7 @@ async function main(): Promise<void> {
     await a2.waitFor((x) => !x.hostConnected, 2000, 'host gone');
     ok(true, 'phones told host disconnected');
     const hostB = await FakeHost.open(wsUrl, room.toLowerCase(), hostToken);
-    ok(hostB.welcome!.room === room && hostB.welcome!.players.length === 4, `host reclaimed ${hostB.welcome!.room} with ${hostB.welcome!.players.length} players`);
+    ok(hostB.welcome!.room === room && hostB.welcome!.players.length === MAX_PLAYERS, `host reclaimed ${hostB.welcome!.room} with ${hostB.welcome!.players.length} players`);
     await a2.waitFor((x) => x.hostConnected, 2000, 'host back');
     ok(true, 'phones told host reconnected');
 

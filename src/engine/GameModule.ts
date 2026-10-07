@@ -21,6 +21,8 @@
 import type {
   DecodedFightInput,
   DecodedInput,
+  DecodedStream,
+  MgFromPhone,
   GameId,
   GameInfo,
   HostToPhone,
@@ -31,10 +33,13 @@ import type {
 import type { PartySession, PlayerRec } from './PartySession';
 
 /** Which phone controller layout the game uses (`PhoneState.game` decides it on the phone). */
-export type ControllerLayout = 'kart' | 'fighter';
+export type ControllerLayout = 'kart' | 'fighter' | 'rush';
 
-/** A decoded phone input packet: tag 0 = kart, tag 1 = fighter (see protocol). */
-export type AnyInput = { tag: 0; input: DecodedInput } | { tag: 1; input: DecodedFightInput };
+/** A decoded phone input packet: tag 0 = kart, tag 1 = fighter, tag 2 = Party Rush stream (see protocol). */
+export type AnyInput = { tag: 0; input: DecodedInput } | { tag: 1; input: DecodedFightInput } | { tag: 2; input: DecodedStream };
+
+/** PARTY RUSH: party-level player events delivered to drop-in modules. */
+export type PlayerEvent = 'join' | 'rejoin' | 'leave' | 'remove' | 'profile';
 
 /** One human taking part in a match / sandbox. Index in the seats array = engine slot. */
 export interface MatchSeat {
@@ -91,8 +96,10 @@ export interface TutorialDef {
 
 /** Host overlay views a module contributes (built once, reused). */
 export interface ModuleViews {
-  setup: ModuleScreenView;
-  results: ModuleScreenView;
+  /** Required unless the module is `dropIn`. */
+  setup?: ModuleScreenView;
+  /** Required unless the module is `dropIn`. */
+  results?: ModuleScreenView;
   /** Optional: replaces the generic race/loading overlay. */
   race?: ModuleScreenView;
   /** Required when `hasSandbox`. */
@@ -203,6 +210,25 @@ export interface GameModule {
   createViews(ctx: unknown): ModuleViews;
   /** Optional host keyboard handling while this game is active (return true if consumed). */
   onHostKey?(e: KeyboardEvent): boolean;
+
+  // ------------------------------------------------------------------ PARTY RUSH: drop-in games (optional)
+  /**
+   * Drop-in / drop-out endless game: no lobby ready-check, tutorial, setup or results screens. Picking it
+   * (or leader START in the lobby) puts the session straight into screen 'race' with an EMPTY seat map;
+   * every connected player's phone shows the game's layout. The module tracks its own roster from
+   * `session.players` + `onPlayer`, gets input/messages by playerId, and talks to phones itself
+   * (`session.send`). `quit()` is called when the host goes back to the hub. Pause/vote, `status()`,
+   * `startFromSetup`, `post`, `setSeatAI` and `input(seat)` are never used for drop-in modules.
+   */
+  readonly dropIn?: boolean;
+  /** dropIn: the session entered the endless loop (screen 'race'). Idempotent. */
+  startEndless?(): void;
+  /** dropIn: party player events (join = new player, rejoin = reconnected, leave = disconnected, remove = left/kicked, profile = name changed). */
+  onPlayer?(playerId: string, ev: PlayerEvent): void;
+  /** dropIn: a `{t:'mg'}` phone message. */
+  onMg?(playerId: string, m: MgFromPhone): void;
+  /** dropIn: an input packet (tag 2 stream) from a phone. */
+  inputFrom?(playerId: string, input: AnyInput): void;
 }
 
 /** Helper for modules: slot-sorted seat rows → ResultRow colour etc. */

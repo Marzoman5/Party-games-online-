@@ -19,6 +19,7 @@ function lobbyView(p: PlayerRec): LobbyPlayer {
     isLeader: p.isLeader,
     tutorialDone: p.tutorialDone,
     team: p.team,
+    emoji: p.emoji,
   };
 }
 
@@ -82,6 +83,8 @@ export class PhoneSync {
       gameSetup,
       sandbox: s.sandboxView,
       resultsInfo: r ? r.info : null,
+      watch: s.watchStatus(p),
+      secure: s.https,
     };
   }
 

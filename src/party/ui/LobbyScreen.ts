@@ -41,6 +41,8 @@ export class FaceView {
 
 class GameCard {
   readonly root: HTMLButtonElement;
+  /** Party Rush: "Motion controls need secure mode" (shown when the server isn't in HTTPS mode). */
+  readonly note: HTMLDivElement | null = null;
   constructor(
     readonly id: GameId,
     s: PartySession,
@@ -50,6 +52,11 @@ class GameCard {
     this.root.style.setProperty('--gc', info.color);
     this.root.innerHTML = `<div class="kp-gcard-art">${gameCardArt(id)}</div>${gameLogoMarkup(info)}<div class="kp-gcard-tag"></div><div class="kp-gcard-pick">✓ SELECTED</div>`;
     this.root.querySelector('.kp-gcard-tag')!.textContent = info.tagline;
+    if (s.modules[id].dropIn) {
+      this.note = h('div', { class: 'kp-gcard-note', 'data-tid': 'rush-secure-note' });
+      this.note.innerHTML = 'Motion controls need secure mode — start with <b>Start Party Hub (Tilt Steering)</b>';
+      this.root.appendChild(this.note);
+    }
     this.root.addEventListener('click', (e) => {
       e.stopPropagation();
       s.hostPickGame(id);
@@ -152,11 +159,13 @@ export class LobbyScreen implements ScreenView {
   private readonly games: GameCard[] = [];
   private readonly pickHint = h('div', 'kp-gpick-hint');
   private knownIds = new Set<string>();
+  private grid!: HTMLDivElement;
 
   constructor(private readonly ctx: UiContext) {
     this.qr = new QrView(ctx.apiBase, 'kp-qr-small');
     this.qr.root.querySelector('img')!.dataset.tid = 'qr';
     const grid = h('div', 'kp-cards');
+    this.grid = grid;
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const c = new Card(i, (id) => ctx.session.hostRemovePlayer(id));
       this.cards.push(c);
@@ -169,6 +178,7 @@ export class LobbyScreen implements ScreenView {
       h('div', 'kp-join-chip', h('span', {}, 'Join at '), this.url, h('span', {}, ' · code '), this.code),
     );
     const picker = h('div', 'kp-gpick');
+    picker.style.setProperty('--games', String(GAME_IDS.filter((id) => ctx.session.modules[id]).length));
     for (const id of GAME_IDS) {
       if (!ctx.session.modules[id]) continue;
       const c = new GameCard(id, ctx.session);
@@ -195,6 +205,7 @@ export class LobbyScreen implements ScreenView {
     for (const g of this.games) {
       toggle(g.root, 'kp-selected', g.id === s.gameId);
       toggle(g.root, 'kp-loading', g.id === s.switching);
+      if (g.note) toggle(g.note, 'kp-on', !s.https && s.hostedOnce);
     }
     const lead = s.leader;
     setText(
@@ -207,11 +218,22 @@ export class LobbyScreen implements ScreenView {
     );
     const setup = mod.getSetup() as { teams?: unknown };
     const teams = mod.id !== 'kart' && setup.teams === true;
-    const bySlot: (PlayerRec | null)[] = [null, null, null, null];
+    const bySlot: (PlayerRec | null)[] = new Array<PlayerRec | null>(MAX_PLAYERS).fill(null);
     for (const p of s.players) if (p.slot >= 0 && p.slot < MAX_PLAYERS) bySlot[p.slot] = p;
     const firstEmpty = bySlot.findIndex((p) => !p);
+    // Show 4 seats like before; with more players grow the grid (always one open seat with the QR, max 16).
+    let highest = -1;
+    bySlot.forEach((p, i) => {
+      if (p) highest = i;
+    });
+    const shown = Math.min(MAX_PLAYERS, Math.max(4, highest + 1, firstEmpty + 1));
+    const cols = shown <= 4 ? 4 : Math.ceil(shown / 2);
+    this.grid.style.setProperty('--cols', String(cols));
+    toggle(this.grid, 'kp-dense', shown > 4);
+    toggle(this.grid, 'kp-dense-xl', shown > 10);
     const ids = new Set<string>();
     this.cards.forEach((c, i) => {
+      toggle(c.root, 'kp-hidden', i >= shown);
       const p = bySlot[i];
       if (p) ids.add(p.playerId);
       let look: CharacterLook | null = null;
@@ -239,7 +261,11 @@ export class LobbyScreen implements ScreenView {
     const notReady = connected.filter((p) => !p.ready);
     let status: string;
     let sub = '';
-    if (connected.length === 0) {
+    const seats = Math.min(mod.info.maxPlayers, MAX_PLAYERS);
+    if (mod.dropIn) {
+      status = connected.length ? `${mod.info.emoji} ${mod.info.title}: no setup — jump straight in!` : 'Waiting for players to join…';
+      sub = leader ? `${leader.name} (leader) taps START — or click the ${mod.info.title} card` : 'Scan the QR code with your phone camera';
+    } else if (connected.length === 0) {
       status = 'Waiting for players to join…';
       sub = 'Scan the QR code with your phone camera';
     } else if (notReady.length > 0) {
@@ -250,11 +276,16 @@ export class LobbyScreen implements ScreenView {
           : 'Pick a name and character on your phone, then tap READY';
     } else {
       status = leader ? `${leader.name} (leader) can start ${mod.info.title} on their phone` : 'Everyone is ready!';
-      sub = connected.length < MAX_PLAYERS ? 'More friends? Scan the code — there’s room for 4' : 'Full house — let’s go!';
+      sub =
+        connected.length > seats
+          ? `${seats} play ${mod.info.title} at once (first to join) — the others watch this one`
+          : connected.length < seats
+            ? `More friends? Scan the code — ${seats} can play ${mod.info.title}`
+            : 'Full house — let’s go!';
     }
     setText(this.status, status);
     setText(this.sub, sub);
-    toggle(this.status, 'kp-go', connected.length > 0 && notReady.length === 0);
+    toggle(this.status, 'kp-go', connected.length > 0 && (notReady.length === 0 || !!mod.dropIn));
   }
 
   tryIt(playerId: string, kind: 'drift' | 'item', _label = ''): void {

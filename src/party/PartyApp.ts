@@ -215,6 +215,7 @@ export class PartyApp {
             isLeader: p.isLeader,
             tutorialDone: p.tutorialDone,
             team: p.team,
+            emoji: p.emoji,
           })),
           tutorial: t ? { step: Math.min(t.step, t.total - 1), total: t.total, acks: s.tutorialAcks, phase: t.phase } : null,
           setup: { ...s.setup },
@@ -243,7 +244,11 @@ export class PartyApp {
         return p ? s.sync.buildState(p) : null;
       },
       pickGame: async (id: GameId) => {
-        if (id === s.gameId) return true;
+        if (id === s.gameId) {
+          // Re-picking a drop-in game (Party Rush) from the hub jumps back into it.
+          if (s.game.dropIn) s.hostPickGame(id);
+          return true;
+        }
         const where = s.screen;
         if (where !== 'lobby' && where !== 'title' && where !== 'setup' && where !== 'results') return false;
         return s.switchGame(id, where === 'setup' || where === 'results');

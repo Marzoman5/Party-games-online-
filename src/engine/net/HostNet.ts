@@ -5,14 +5,16 @@
  *   (or a server blip) reclaims the same room code and its players.
  * - Auto-reconnects with exponential backoff; pings the server and treats a silent socket
  *   as dead (laptop sleep, Wi-Fi hiccup) so recovery is quick.
- * - Input packets (JSON arrays) are decoded and handed out IMMEDIATELY (no batching). Both tags
- *   are understood: `[0, …kart…, playerId]` and `[1, …fighter…, playerId]` (playerId = last element).
+ * - Input packets (JSON arrays) are decoded and handed out IMMEDIATELY (no batching). All tags
+ *   are understood: `[0, …kart…, playerId]`, `[1, …fighter…, playerId]` and `[2, …rush stream…, playerId]`
+ *   (playerId = last element).
  * - Control messages are dispatched to the handler (the PartySession).
  */
 import {
   PROTOCOL_VERSION,
   decodeFightInput,
   decodeInput,
+  decodeStream,
   type HostHello,
   type HostToPhone,
   type HostWelcome,
@@ -156,6 +158,7 @@ export class HostNet implements NetPort {
     // Fast path: relayed input packets
     //   kart    `[0, seq, steer, throttle, brake, buttons, itemPresses, playerId]`
     //   fighter `[1, seq, x, y, buttons, a, s, j, g, playerId]`
+    //   rush    `[2, seq, rid, a, b, c, playerId]`
     if (data.charCodeAt(0) === 91 /* [ */) {
       let arr: unknown;
       try {
@@ -172,6 +175,9 @@ export class HostNet implements NetPort {
       } else if (arr[0] === 1) {
         const input = decodeFightInput(arr);
         if (input) this.handler.onInput(pid, { tag: 1, input });
+      } else if (arr[0] === 2) {
+        const input = decodeStream(arr);
+        if (input) this.handler.onInput(pid, { tag: 2, input });
       }
       return;
     }

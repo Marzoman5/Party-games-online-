@@ -11,6 +11,7 @@ import { FaceView } from '../../../../party/ui/LobbyScreen';
 import { button, esc, h, replay, setText, toggle } from '../../../../party/ui/dom';
 import { getCharacter } from '../../../../kart/roster';
 import type { SmashModule } from '../SmashModule';
+import { SwitchPicker } from '../../../../party/ui/switchPicker';
 
 export class SmashResultsOverlay implements ScreenView {
   readonly root: HTMLDivElement;
@@ -20,7 +21,7 @@ export class SmashResultsOverlay implements ScreenView {
   private readonly bannerSub = h('div', 'sh-winner-sub');
   private readonly table = h('div', 'sh-table');
   private readonly who = h('div', 'kp-results-who');
-  private readonly switchBtn: HTMLButtonElement;
+  private readonly switcher: SwitchPicker;
   private shown: ResultsState | null = null;
   private portraitsKey = '';
 
@@ -30,7 +31,7 @@ export class SmashResultsOverlay implements ScreenView {
   ) {
     const s = ctx.session;
     this.banner.append(this.bannerKicker, this.bannerName, this.bannerSub);
-    this.switchBtn = button('Switch game', 'kp-switch', () => s.hostPost('switch'), 'btn-switch');
+    this.switcher = new SwitchPicker(s);
     this.root = h(
       'div',
       { class: 'kp-results sh-results', 'data-tid': 'screen-results' },
@@ -49,7 +50,7 @@ export class SmashResultsOverlay implements ScreenView {
             'kp-host-actions',
             button('↻ Rematch', 'kp-primary', () => s.hostPost('replay'), 'btn-replay'),
             button('Change settings', '', () => s.hostPost('track'), 'btn-track'),
-            this.switchBtn,
+            this.switcher.root,
             button('Lobby', '', () => s.hostPost('lobby'), 'btn-lobby'),
           ),
         ),
@@ -61,9 +62,7 @@ export class SmashResultsOverlay implements ScreenView {
     const r = s.results;
     const leader = s.leader;
     setText(this.who, leader ? `${leader.name} picks what’s next on their phone` : 'The leader picks what’s next');
-    const other = s.otherGame();
-    toggle(this.switchBtn, 'kp-hidden', !other);
-    if (other) this.switchBtn.innerHTML = `${s.modules[other].info.emoji} Play ${esc(s.modules[other].info.title)}`;
+    this.switcher.update();
     if (!r || r.game !== 'smash') return;
     const pk = r.rows.map((x) => (this.mod.portrait(x.characterId) ? 1 : 0)).join('');
     if (r === this.shown && pk === this.portraitsKey) return;

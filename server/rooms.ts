@@ -30,6 +30,7 @@ import {
   type Pong,
   type RelayedFightInputPacket,
   type RelayedInputPacket,
+  type RelayedStreamPacket,
   type ServerError,
 } from '../src/net/protocol';
 import type { Logger } from './log';
@@ -114,6 +115,8 @@ const PHONE_MSG_TYPES = new Set<PhoneToHost['t']>([
   'gsetup',
   'team',
   'practice_done',
+  // PARTY RUSH
+  'mg',
 ]);
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -368,7 +371,7 @@ export class Hub {
       let connected = 0;
       for (const s of room.seats.values()) if (s.client) connected++;
       if (connected >= MAX_PLAYERS) {
-        this.reject(c, 'room_full', `This game already has ${MAX_PLAYERS} players.`, CLOSE_ROOM_FULL);
+        this.reject(c, 'room_full', `This party already has ${MAX_PLAYERS} players.`, CLOSE_ROOM_FULL);
         return;
       }
       // Free a seat if needed: evict the disconnected seat that left longest ago.
@@ -428,8 +431,9 @@ export class Hub {
     }
     if (!Array.isArray(arr)) return;
     const tag: unknown = arr[0];
-    // Tag 0 = kart input (7 fields), tag 1 = PARTY HUB smash fight input (9 fields).
-    const n = tag === 0 ? 7 : tag === 1 ? 9 : 0;
+    // Tag 0 = kart input (7 fields), tag 1 = PARTY HUB smash fight input (9 fields),
+    // tag 2 = PARTY RUSH minigame stream (6 fields).
+    const n = tag === 0 ? 7 : tag === 1 ? 9 : tag === 2 ? 6 : 0;
     if (n === 0 || arr.length < n) return;
     for (let i = 1; i < n; i++) {
       const v: unknown = arr[i];
@@ -439,8 +443,11 @@ export class Hub {
     if (tag === 0) {
       const out: RelayedInputPacket = [0, a[1], a[2], a[3], a[4], a[5], a[6], seat.playerId];
       room.host.sock.send(JSON.stringify(out));
-    } else {
+    } else if (tag === 1) {
       const out: RelayedFightInputPacket = [1, a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], seat.playerId];
+      room.host.sock.send(JSON.stringify(out));
+    } else {
+      const out: RelayedStreamPacket = [2, a[1], a[2], a[3], a[4], a[5], seat.playerId];
       room.host.sock.send(JSON.stringify(out));
     }
   }

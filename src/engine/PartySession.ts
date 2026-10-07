@@ -5,18 +5,23 @@
  *         → [sandbox: "try it" practice, games with `hasSandbox`] → setup → loading → race → results
  *                                                              ↘ paused ↗     (late joiners: 'waiting')
  *
- * It owns the players (lobby slots 0..3), the leader, ready flags, teams, the active game, the
+ * It owns the players (lobby slots 0..15), the leader, ready flags, teams, the active game, the
  * tutorial runner, the sandbox, the pause vote and the seat ↔ playerId map of the running match.
  * It drives the active game ONLY through `GameModule` (src/engine/GameModule.ts) and talks to
  * phones only through the NetPort. Players, slots, leader and ready flags survive game switches.
  *
  * Phones get a personalised PhoneState whenever something relevant changes (diffed per player),
  * the module's ~10 Hz status during matches/sandbox, and module fx one-shots (see PhoneSync).
+ *
+ * PARTY RUSH: up to 16 players (Kart/Smash seat the first `maxPlayers` by join order, the rest watch),
+ * and DROP-IN modules (`GameModule.dropIn`): picking one goes straight to screen 'race' with an empty
+ * seat map; the module tracks its own roster and gets input/messages/player events by playerId.
  */
 import { CHARACTERS } from '../kart/roster';
 import {
   GAME_IDS,
   MAX_PLAYERS,
+  PLAYER_EMOJIS,
   SLOT_COLORS,
   type GameId,
   type GameInfo,
@@ -28,7 +33,8 @@ import {
   type ScreenId,
   type LobbyPlayer,
 } from '../net/protocol';
-import type { AnyInput, GameModule, MatchSeat, ResultsInfo, TryIt } from './GameModule';
+import type { AnyInput, GameModule, MatchSeat, PlayerEvent, ResultsInfo, TryIt } from './GameModule';
+import { funnyName } from './names';
 import type { NetPort, NetStatus } from './net/HostNet';
 import {
   STORAGE,
@@ -44,6 +50,8 @@ import { PhoneSync } from './PhoneSync';
 
 export interface PlayerRec extends LobbyPlayer {
   team: number;
+  /** PARTY RUSH: unique emoji (always set). */
+  emoji: string;
   /** Join order (leader succession). */
   joinSeq: number;
   /** Joined while a match was running → 'waiting' until the next one. */
@@ -110,7 +118,7 @@ const NAME_MAX = 14;
 const DEFAULT_RACE_SETUP: RaceSetup = { mode: 'single', trackId: 'sunny', cc: 150, laps: 3 };
 
 interface Snapshot {
-  players: { playerId: string; slot: number; name: string; characterId: string; joinSeq: number; leader: boolean; team?: number }[];
+  players: { playerId: string; slot: number; name: string; characterId: string; joinSeq: number; leader: boolean; team?: number; emoji?: string }[];
   /** Kart setup (legacy field name). */
   setup?: RaceSetup;
   tipsEnabled: boolean;
@@ -224,6 +232,27 @@ export class PartySession {
     return out;
   }
 
+  /** The active game is a drop-in game (Party Rush) and its endless loop is running. */
+  get dropInLive(): boolean {
+    return !!this.game.dropIn && !!this.match && this.match.kind === 'match' && RACE_SCREENS.has(this.screen);
+  }
+
+  /**
+   * Why a connected player is not in the running Kart/Smash match: 'full' (the match seats only the first
+   * `maxPlayers` by join order) or 'late' (joined after it started). null when playing / not applicable.
+   */
+  watchStatus(p: PlayerRec): 'full' | 'late' | null {
+    const m = this.match;
+    if (this.game.dropIn || !m || m.kind !== 'match' || !RACE_SCREENS.has(this.screen) && this.screen !== 'results') return null;
+    if (m.slotOf.has(p.playerId)) return null;
+    return p.late ? 'late' : 'full';
+  }
+
+  /** Connected players watching the running match because it is full (TV chip). */
+  get watchers(): PlayerRec[] {
+    return this.connectedPlayers.filter((p) => this.watchStatus(p) === 'full');
+  }
+
   /** Seated in the running match (not the sandbox). */
   isRacing(id: string): boolean {
     return !!this.match && this.match.kind === 'match' && this.match.slotOf.has(id) && RACE_SCREENS.has(this.screen);
@@ -232,6 +261,8 @@ export class PartySession {
   /** What a given phone should show. */
   screenFor(p: PlayerRec): ScreenId {
     const s = this.screen;
+    // Drop-in games: everyone connected plays (the module decides who takes part in each round).
+    if (this.game.dropIn && RACE_SCREENS.has(s)) return 'race';
     if (RACE_SCREENS.has(s) && !(this.match && this.match.kind === 'match' && this.match.slotOf.has(p.playerId))) return 'waiting';
     // Joined after the lobby (e.g. during setup) and not ready yet: let them pick + ready up first.
     if (s === 'setup' && !p.ready) return 'lobby';
@@ -311,7 +342,11 @@ export class PartySession {
         this.safe(() => this.game.setSeatAI(k, !p.connected));
       }
     }
-    if (firstTime) {
+    if (firstTime && this.game.dropIn && this.game.loaded) {
+      // Host reload with a drop-in game active (or picked before the first connection): straight back in.
+      for (const p of this.players) p.ready = false;
+      if (!this.dropInLive) this.startEndless();
+    } else if (firstTime) {
       // Fresh page (or host reload): nothing is running yet.
       for (const p of this.players) p.ready = false;
       this.screen = this.players.length ? 'lobby' : 'title';
@@ -320,6 +355,7 @@ export class PartySession {
     }
     this.ensureLeader();
     this.sync.forceAll();
+    if (this.game.dropIn) for (const p of this.players) this.playerEvent(p.playerId, p.connected ? 'rejoin' : 'leave');
     this.changed();
   }
 
@@ -335,7 +371,9 @@ export class PartySession {
     p.connected = true;
     p.lastInput = null;
     const m = this.match;
-    if (m && m.kind === 'match' && RACE_SCREENS.has(this.screen)) {
+    if (this.dropInLive) {
+      // The drop-in module announces joins itself.
+    } else if (m && m.kind === 'match' && RACE_SCREENS.has(this.screen)) {
       const k = m.slotOf.get(id);
       if (k !== undefined) {
         this.safe(() => this.game.setSeatAI(k, false));
@@ -356,6 +394,7 @@ export class PartySession {
     this.checkPauseVotes();
     this.checkTutorialAcks();
     this.sync.force(id);
+    this.playerEvent(id, isNew ? 'join' : 'rejoin');
     this.events.emit('joined', { playerId: id });
     this.changed();
   }
@@ -364,6 +403,7 @@ export class PartySession {
     const p = this.player(id);
     if (!p || !p.connected) return;
     this.markDisconnected(p, true);
+    this.playerEvent(id, 'leave');
     this.ensureLeader();
     this.checkPauseVotes();
     this.checkTutorialAcks();
@@ -372,6 +412,16 @@ export class PartySession {
   }
 
   onInput(id: string, input: AnyInput): void {
+    if (this.game.dropIn) {
+      if (this.dropInLive) {
+        try {
+          this.game.inputFrom?.(id, input);
+        } catch (err) {
+          console.error('[party] input failed', err);
+        }
+      }
+      return;
+    }
     const m = this.match;
     if (m && ((m.kind === 'match' && RACE_SCREENS.has(this.screen)) || (m.kind === 'sandbox' && this.screen === 'sandbox'))) {
       const k = m.slotOf.get(id);
@@ -404,7 +454,18 @@ export class PartySession {
     switch (m.t) {
       case 'profile':
         this.setProfile(p, m.name, m.characterId);
+        this.playerEvent(id, 'profile');
         break;
+      case 'mg':
+        // PARTY RUSH minigame channel: only meaningful while a drop-in game runs. High rate → no changed().
+        if (this.dropInLive) {
+          try {
+            this.game.onMg?.(id, m);
+          } catch (err) {
+            console.error('[party] mg failed', err);
+          }
+        }
+        return;
       case 'ready':
         if (!RACE_SCREENS.has(this.screen)) p.ready = !!m.ready;
         else if (p.late || !this.isRacing(id)) p.ready = !!m.ready;
@@ -605,6 +666,13 @@ export class PartySession {
     this.changed();
   }
 
+  /** Host removes a player (connected or not): their phone is told and their seat is freed. */
+  hostKickPlayer(id: string): void {
+    const p = this.player(id);
+    if (p) this.removePlayer(p, true);
+    this.changed();
+  }
+
   /** Host click on a game card (same rules as the leader's phone). */
   hostPickGame(id: GameId): void {
     this.pickGame(id);
@@ -621,7 +689,11 @@ export class PartySession {
     if (!this.modules[id] || this.soloActive) return;
     const where = this.screen;
     if (where !== 'lobby' && where !== 'title' && where !== 'setup' && where !== 'results') return;
-    if (id === this.gameId) return;
+    if (id === this.gameId) {
+      // Re-picking the active drop-in game from the hub jumps (back) into it.
+      if (this.game.dropIn && this.game.loaded) this.startEndless();
+      return;
+    }
     void this.switchGame(id, where === 'setup' || where === 'results');
   }
 
@@ -667,7 +739,10 @@ export class PartySession {
     this.match = null;
     this.pause = null;
     this.sync.stopStatus();
-    if (proceed && this.players.length) {
+    if (mod.dropIn) {
+      // Drop-in games start right away with whoever is there (even nobody: the TV shows the join QR).
+      if (!this.soloActive && (this.hostedOnce || this.screen !== 'title')) this.startEndless();
+    } else if (proceed && this.players.length) {
       if (!this.tutorialsSeen.has(id)) this.startTutorial(true);
       else this.screen = 'setup';
     }
@@ -710,6 +785,12 @@ export class PartySession {
       this.startQueued = true;
       return;
     }
+    if (this.game.dropIn && (this.screen === 'lobby' || this.screen === 'setup' || this.screen === 'results' || this.screen === 'tutorial')) {
+      // Drop-in games never wait for ready-ups, tutorials or setup.
+      if (this.screen === 'tutorial') this.finishTutorial();
+      this.startEndless();
+      return;
+    }
     if (this.screen === 'lobby') {
       if (!this.allConnectedReady()) {
         this.sync.forceAll();
@@ -728,6 +809,8 @@ export class PartySession {
 
   startTutorial(fromStart: boolean): void {
     if (this.soloActive || RACE_SCREENS.has(this.screen)) return;
+    // Drop-in games explain themselves in 5 seconds per minigame: no tutorial screen.
+    if (this.game.dropIn) return;
     if (this.screen === 'tutorial') return;
     if (this.screen === 'sandbox') this.finishSandbox();
     const mod = this.game;
@@ -825,7 +908,11 @@ export class PartySession {
   private startSandbox(): boolean {
     const mod = this.game;
     if (!mod.startSandbox) return false;
-    const humans = this.connectedPlayers.filter((p) => !p.late).sort((a, b) => a.slot - b.slot).slice(0, mod.info.maxPlayers);
+    const humans = this.connectedPlayers
+      .filter((p) => !p.late)
+      .sort((a, b) => a.joinSeq - b.joinSeq)
+      .slice(0, mod.info.maxPlayers)
+      .sort((a, b) => a.slot - b.slot);
     if (!humans.length) return false;
     const seats = humans.map((p) => this.seatFor(p));
     try {
@@ -886,12 +973,16 @@ export class PartySession {
     return { kind, game: this.gameId, slotOf, playerOfSlot: seats.map((s) => s.playerId), seats };
   }
 
-  /** Seats for a new match: connected + ready + not late, by slot. */
+  /**
+   * Seats for a new match: connected + ready + not late; with more players than the game seats, the
+   * first `maxPlayers` by JOIN ORDER play (the rest watch this one). Seats are then ordered by slot.
+   */
   matchSeats(): MatchSeat[] {
     return this.players
       .filter((p) => p.connected && p.ready && !p.late)
-      .sort((a, b) => a.slot - b.slot)
+      .sort((a, b) => a.joinSeq - b.joinSeq)
       .slice(0, Math.min(MAX_PLAYERS, this.game.info.maxPlayers))
+      .sort((a, b) => a.slot - b.slot)
       .map((p) => this.seatFor(p));
   }
 
@@ -934,6 +1025,46 @@ export class PartySession {
     if (this.screen === 'loading' && this.game.isLive()) this.screen = 'race';
     this.sync.startStatus();
     return true;
+  }
+
+  /** Enter a drop-in game's endless loop (screen 'race', empty seat map). Idempotent. */
+  private startEndless(): void {
+    const mod = this.game;
+    if (!mod.dropIn || this.soloActive) return;
+    if (this.dropInLive) return;
+    this.timers.clear('tutorial');
+    this.timers.clear('tutorialAck');
+    this.timers.clear('tutorialAllAcked');
+    this.tutorial = null;
+    this.sandbox = null;
+    this.pause = null;
+    this.results = null;
+    this.match = this.makeMatch('match', []);
+    for (const p of this.players) {
+      p.late = false;
+      p.lastInput = null;
+    }
+    this.screen = 'race';
+    this.racesStarted++;
+    try {
+      mod.startEndless?.();
+    } catch (err) {
+      console.error('[party] startEndless failed', err);
+      this.toast(`${mod.info.title} couldn’t start`, 'error');
+      this.match = null;
+      this.screen = this.players.length ? 'lobby' : 'title';
+    }
+    this.sync.forceAll();
+  }
+
+  /** Deliver a party player event to the active drop-in module. */
+  private playerEvent(id: string, ev: PlayerEvent): void {
+    if (!this.game.dropIn) return;
+    try {
+      this.game.onPlayer?.(id, ev);
+    } catch (err) {
+      console.error('[party] onPlayer failed', err);
+    }
   }
 
   private doPause(by: string): void {
@@ -1023,7 +1154,7 @@ export class PartySession {
     }
   }
 
-  /** The next game in the registry after the active one. */
+  /** The next game in the registry after the active one (fallback when a 'switch' names no game). */
   otherGame(): GameId | null {
     const ids = GAME_IDS.filter((id) => this.modules[id]);
     if (ids.length < 2) return null;
@@ -1056,12 +1187,20 @@ export class PartySession {
         }
       }
     }
-    if (!characterId) characterId = CHARACTERS[0].id;
+    // More players than racers (> 8): duplicates are fine — Kart/Smash only seat the first 4 anyway.
+    if (!characterId) characterId = CHARACTERS[(slot * 3) % CHARACTERS.length].id;
     const realSlot = snap && this.slotFree(snap.slot) ? snap.slot : slot;
+    const usedEmoji = new Set(this.players.map((q) => q.emoji));
+    let emoji = snap?.emoji && !usedEmoji.has(snap.emoji) ? snap.emoji : '';
+    if (!emoji) {
+      const free = PLAYER_EMOJIS.filter((e) => !usedEmoji.has(e));
+      emoji = free.length ? free[Math.floor(Math.random() * free.length)] : PLAYER_EMOJIS[realSlot % PLAYER_EMOJIS.length];
+    }
     const p: PlayerRec = {
       playerId: id,
       slot: realSlot,
-      name: snap?.name || `Player ${slot + 1}`,
+      name: snap?.name || funnyName(this.players.map((q) => q.name)),
+      emoji,
       characterId,
       ready: false,
       connected: false,
@@ -1094,6 +1233,7 @@ export class PartySession {
     this.players = this.players.filter((q) => q !== p);
     this.sync.forget(p.playerId);
     if (kick) this.net.kick(p.playerId);
+    this.playerEvent(p.playerId, 'remove');
     if (p.isLeader) {
       p.isLeader = false;
       this.ensureLeader();
@@ -1124,7 +1264,8 @@ export class PartySession {
       const k = m.slotOf.get(p.playerId)!;
       this.safe(() => this.game.retireFromSandbox?.(k));
     }
-    if (announce) this.toast(`${p.name} disconnected`, 'error');
+    // Drop-in games: leaving is silent (the module greys the player out).
+    if (announce && !this.dropInLive) this.toast(`${p.name} disconnected`, 'error');
   }
 
   private ensureLeader(): void {
@@ -1149,7 +1290,7 @@ export class PartySession {
     if (typeof rawName === 'string') {
       // eslint-disable-next-line no-control-regex
       const name = rawName.replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, NAME_MAX);
-      p.name = name || `Player ${p.slot + 1}`;
+      p.name = name || p.name || funnyName(this.players.map((q) => q.name));
     }
     if (typeof rawChar === 'string' && rawChar !== p.characterId) {
       const valid = CHARACTERS.some((c) => c.id === rawChar);
@@ -1256,6 +1397,7 @@ export class PartySession {
         joinSeq: p.joinSeq,
         leader: p.isLeader,
         team: p.team,
+        emoji: p.emoji,
       })),
       setup: this.setup,
       tipsEnabled: this.tipsEnabled,

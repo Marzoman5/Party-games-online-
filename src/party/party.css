@@ -3180,3 +3180,90 @@ html[data-game='smash'] .kp-race-chip {
   background: linear-gradient(100deg, rgba(255, 122, 47, 0.35), rgba(122, 61, 255, 0.35));
   border-color: rgba(255, 210, 63, 0.7);
 }
+
+/* ---------------------------------------------------------------- PARTY RUSH: 16-player hub */
+
+.kp-gpick {
+  grid-template-columns: repeat(var(--games, 2), 1fr);
+}
+
+.kp-gcard-note {
+  display: none;
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: calc(var(--u) * 0.8);
+  z-index: 3;
+  font-weight: 800;
+  font-size: calc(var(--u) * 1.45);
+  line-height: 1.2;
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 1);
+  border-radius: calc(var(--u) * 1);
+  background: rgba(18, 10, 46, 0.92);
+  border: calc(var(--u) * 0.2) solid var(--kp-yellow);
+  color: #fff;
+  white-space: normal;
+}
+
+.kp-gcard-note.kp-on {
+  display: block;
+}
+
+.kp-gcard-note b {
+  color: var(--kp-yellow);
+}
+
+.kp-cards.kp-dense {
+  grid-template-columns: repeat(var(--cols, 4), 1fr);
+  grid-auto-rows: 1fr;
+  gap: calc(min(1vh, 0.5625vw) * var(--kp-k) * 1.4);
+}
+
+.kp-cards.kp-dense .kp-card {
+  --u: calc(min(1vh, 0.5625vw) * var(--kp-k) * 0.62);
+}
+
+.kp-cards.kp-dense-xl .kp-card {
+  --u: calc(min(1vh, 0.5625vw) * var(--kp-k) * 0.5);
+}
+
+.kp-card.kp-hidden {
+  display: none;
+}
+
+/* "👀 watching this one" chip (Kart/Smash with more than 4 players). */
+.kp-watch-chip {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--safe) + var(--u) * 1.2);
+  transform: translateX(-50%) translateY(-200%);
+  z-index: 60;
+  max-width: 80vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 900;
+  font-size: calc(var(--u) * 2.1);
+  padding: calc(var(--u) * 0.6) calc(var(--u) * 2);
+  border-radius: 999px;
+  background: rgba(18, 10, 46, 0.9);
+  border: calc(var(--u) * 0.25) solid var(--kp-yellow);
+  color: #fff;
+  opacity: 0;
+  transition:
+    transform 0.4s var(--kp-pop),
+    opacity 0.3s;
+  pointer-events: none;
+}
+
+.kp-watch-chip.kp-on {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.kp-switch-row {
+  display: flex;
+  gap: calc(var(--u) * 1.2);
+  flex-wrap: wrap;
+  justify-content: center;
+}
