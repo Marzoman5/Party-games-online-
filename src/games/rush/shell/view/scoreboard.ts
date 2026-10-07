@@ -155,7 +155,7 @@ export class Scoreboard {
       }
       const rank = ranks.get(e.id) ?? 0;
       const away = e.st === 'away' || !!e.removedAt;
-      const key = `${e.name}|${e.emoji}|${e.color}|${rank}|${e.pts}|${sh.streak(e)}|${e.st}|${e.removedAt ? 1 : 0}|${e.touch}|${lead === e.id}|${e.lastRound === sh.roundsPlayed ? e.lastPts : 0}`;
+      const key = `${two}|${e.name}|${e.emoji}|${e.color}|${rank}|${e.pts}|${sh.streak(e)}|${e.st}|${e.removedAt ? 1 : 0}|${e.touch}|${lead === e.id}|${e.lastRound === sh.roundsPlayed ? e.lastPts : 0}`;
       if (key === r.key) return;
       r.key = key;
       setText(r.rank, rank ? (rank === 1 ? '👑' : `${rank}`) : '–');
@@ -168,7 +168,7 @@ export class Scoreboard {
       const fresh = e.lastRound === sh.roundsPlayed && e.lastPts > 0 && sh.roundsPlayed > 0;
       setText(r.plus, fresh ? `+${e.lastPts}` : '');
       toggle(r.plus, 'rush-on', fresh);
-      setText(r.tag, e.removedAt ? 'left' : away ? '💤 away' : e.st === 'next' ? 'next round' : lead === e.id ? '⭐ leader' : '');
+      setText(r.tag, e.removedAt ? (two ? '👋' : 'left') : away ? (two ? '💤' : '💤 away') : e.st === 'next' ? (two ? '⏭' : 'next round') : lead === e.id ? (two ? '⭐' : '⭐ leader') : '');
       toggle(r.el, 'rush-row-away', away);
       toggle(r.el, 'rush-row-top', rank === 1);
       r.el.dataset.playerId = e.id;

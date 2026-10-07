@@ -264,11 +264,12 @@ export class RushShell {
     if (this.forced && minigameById(this.forced)) {
       id = this.forced;
     } else {
-      const t = this.picker.take(this.settings.enabled, est);
-      if (t) {
-        id = t.id;
-        newPass = t.newPass;
-      }
+      // The game teased on the scoreboard is the one that plays (drawn from the bag once).
+      this.ensureDrawn(est);
+      id = this.drawn;
+      newPass = this.drawnPass;
+      this.drawn = null;
+      this.drawnPass = false;
     }
     this.forced = null;
     const def = id ? minigameById(id) : undefined;
@@ -539,9 +540,9 @@ export class RushShell {
         break;
       case 'lobby':
         if (this.forced) this.forced = null;
-        else if (this.upcoming) {
-          // Take the teased game out of this bag pass.
-          this.picker.take(this.settings.enabled, this.estimateParticipants());
+        else {
+          // Drop the teased game for this bag pass and draw another one.
+          this.drawn = null;
         }
         this.refreshUpcoming();
         this.bump();
@@ -620,6 +621,8 @@ export class RushShell {
     this.history.length = 0;
     this.lastResults = null;
     this.picker.reset();
+    this.drawn = null;
+    this.drawnPass = false;
     this.heat = 1;
     this.sip = { count: 0, lastTarget: '' };
     if (this.phase === 'results') this.enterLobby(false);
@@ -919,6 +922,12 @@ export class RushShell {
         changed = true;
       }
     }
+    if (this.phase === 'lobby' && !this.forced) {
+      // Roster changes can make the teased game unplayable (min players): re-draw so tease == play.
+      const before = this.upcoming;
+      this.refreshUpcoming();
+      if (before !== this.upcoming) changed = true;
+    }
     if (this.stinger && wall - this.stinger.at > this.stinger.ms) {
       this.stinger = null;
       changed = true;
@@ -964,9 +973,31 @@ export class RushShell {
     return this.host.players().find((p) => p.isLeader)?.playerId ?? null;
   }
 
+  /** Bag-drawn next game (kept until it plays; re-drawn only if it became disabled / ineligible). */
+  private drawn: string | null = null;
+  private drawnPass = false;
+
+  private ensureDrawn(players: number): void {
+    if (this.drawn) {
+      const d = minigameById(this.drawn);
+      if (d && this.settings.enabled.includes(this.drawn) && d.meta.minPlayers <= Math.max(1, players)) return;
+      // Not playable right now: back to the front of the bag for later.
+      if (d && this.settings.enabled.includes(this.drawn)) this.picker.bag.unshift(this.drawn);
+      this.drawn = null;
+    }
+    const t = this.picker.take(this.settings.enabled, players);
+    if (t) {
+      this.drawn = t.id;
+      this.drawnPass = this.drawnPass || t.newPass;
+    }
+  }
+
   private refreshUpcoming(): void {
     if (this.forced && minigameById(this.forced)) this.upcoming = this.forced;
-    else this.upcoming = this.picker.peek(this.settings.enabled, this.estimateParticipants());
+    else {
+      this.ensureDrawn(this.estimateParticipants());
+      this.upcoming = this.drawn;
+    }
   }
 
   // =================================================================== minigame context + bots
@@ -1294,6 +1325,7 @@ export class RushShell {
       cueSeq: this.cueSeq,
       heat: this.heat,
       picker: this.picker.snap(),
+      drawn: this.drawn,
       sip: { ...this.sip },
       players,
       history: this.history.slice(-10),
@@ -1310,6 +1342,7 @@ export class RushShell {
     this.cueSeq = int(s.cueSeq, 0, 1e9, 0);
     this.heat = int(s.heat, 1, 3, 1) as Heat;
     this.picker.restore(s.picker);
+    if (typeof s.drawn === 'string' && minigameById(s.drawn)) this.drawn = s.drawn;
     if (s.sip && typeof s.sip === 'object') {
       const sp = s.sip as Record<string, unknown>;
       this.sip = { count: int(sp.count, 0, 1e6, 0), lastTarget: typeof sp.lastTarget === 'string' ? sp.lastTarget.slice(0, 64) : '' };

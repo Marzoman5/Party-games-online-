@@ -54,6 +54,7 @@ export class UpNextCard {
       setText(this.heat, sh.heatUp ? `🔥 HEAT ${r.heat}!` : r.heat > 1 ? `🔥 Heat ${r.heat}` : '');
       toggle(this.heat, 'rush-hide', r.heat <= 1);
       toggle(this.heat, 'rush-up-heat-new', sh.heatUp);
+      toggle(this.who, 'rush-up-who-many', present.length > 8);
       const bots = present.length <= 1 ? Math.max(0, 3 - present.length) : 0;
       this.who.replaceChildren(
         ...present.slice(0, 16).map((e) => {
@@ -128,7 +129,7 @@ export class ResultsCard {
     this.head.replaceChildren(
       h('div', 'rush-res-winners', ...win.slice(0, 4).map((w) => disc(w, win.length > 1 ? 120 : 160))),
       (() => {
-        const t = h('div', { class: 'rush-res-headline', text: c.headline });
+        const t = h('div', { class: `rush-res-headline${c.headline.length > 16 ? ' rush-res-headline-long' : ''}`, text: c.headline });
         if (top) t.style.color = win.length === 1 ? top.color : '#ffd23a';
         return t;
       })(),

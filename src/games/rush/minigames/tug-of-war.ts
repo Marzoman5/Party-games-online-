@@ -571,6 +571,11 @@ export const tugOfWar: MinigameDef = {
         const headline = w === -1 ? "IT'S A DRAW!" : `${TEAM_NAMES[w]} TEAM WINS!`;
         return { ranking, superlatives, headline };
       },
+      teamOf(id) {
+        for (const t of [0, 1] as const) if (teams[t].some((x) => x.p.id === id)) return t;
+        return undefined;
+      },
+
       botHint(id) {
         const tp = byId.get(id);
         if (!tp) return undefined;

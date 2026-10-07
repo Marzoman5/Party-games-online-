@@ -274,3 +274,6 @@ Durations are hard caps per heat [1,2,3] (seconds). "Scale" = behaviour at 1 / 2
 - MG1/MG2 deviations accepted: Don't Move! ranks by mean per-sample movement `a` (not `c`, which saturates
   and is skewed by dropped packets); Hot Potato caps catch grace at 0.8 s past the fuse; Tilt Maze generates
   seeded, length-checked layouts per round instead of hand-made ones; Quick Draw raise window 600 ms.
+- SHELL: Rush overlays mark test ids with `data-rtid`; `StageView` sets `data-testid` only on the layers that
+  are actually visible (HostUI's `data-tid` would tag hidden layers too). Only `rush-stage` uses `data-tid`.
+- LEAD: Tug of War implements `teamOf` (team reaches phones as `me.team`).

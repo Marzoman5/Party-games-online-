@@ -469,6 +469,9 @@
 .rush-sb-empty.rush-sb-noboard .rush-sb-side {
   right: calc(var(--su) * 600);
   width: calc(var(--su) * 720);
+  top: calc(var(--su) * 140);
+  bottom: calc(var(--su) * 140);
+  justify-content: center;
 }
 
 .rush-sb-empty.rush-sb-noboard .rush-sb-board {
@@ -736,6 +739,19 @@
   font-size: calc(var(--su) * 34);
   font-weight: 900;
   text-shadow: 0 calc(var(--su) * 3) 0 rgba(0, 0, 0, 0.7);
+}
+
+.rush-up-who-many {
+  top: calc(var(--su) * 835);
+  gap: calc(var(--su) * 8) calc(var(--su) * 20);
+}
+
+.rush-up-who-many .rush-up-who-item {
+  font-size: calc(var(--su) * 28);
+}
+
+.rush-up-who-many .rush-disc {
+  --d: 40 !important;
 }
 
 .rush-up-safe {
@@ -1024,6 +1040,10 @@
   text-shadow: 0 calc(var(--su) * 6) 0 rgba(0, 0, 0, 0.7);
   animation: rush-pop 0.6s var(--kp-pop) both;
   animation-delay: 0.15s;
+}
+
+.rush-res-headline-long {
+  font-size: calc(var(--su) * 80);
 }
 
 .rush-res-rows {
