@@ -62,6 +62,8 @@ export function drawEmoji(g: CanvasRenderingContext2D, emoji: string, x: number,
   g.save();
   g.globalAlpha *= alpha;
   g.font = `${Math.round(size)}px ${EMOJI_FONT}`;
+  // Colour emoji take the alpha of the current fillStyle in Chrome: always draw with an opaque one.
+  g.fillStyle = '#000';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   // Emoji glyphs sit slightly high in most fonts.

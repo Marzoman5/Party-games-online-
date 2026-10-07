@@ -367,7 +367,7 @@ export const dontMove: MinigameDef = {
         const now = ctx.time;
         for (const d of ds) {
           const dt = now - d.at;
-          if (d.started && dt >= 0 && dt < d.len) drawDistraction(g, d, t, dt);
+          if (v.phase === 'play' && d.started && dt >= 0 && dt < d.len) drawDistraction(g, d, t, dt);
         }
         if (v.phase === 'count') {
           g.fillStyle = 'rgba(8,21,38,0.55)';

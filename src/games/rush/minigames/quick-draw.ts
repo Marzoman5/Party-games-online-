@@ -84,7 +84,6 @@ export const quickDraw: MinigameDef = {
     let revealSec = 1.5;
     let drawAt = 0;
     let fastest: Cowboy | null = null;
-    let lastViewT = 0;
     let drawFlashT = -10;
     let tokenR = 60;
     let rows = 1;
@@ -133,7 +132,7 @@ export const quickDraw: MinigameDef = {
 
     function startDraw(): void {
       drawAt = ctx.time;
-      drawFlashT = lastViewT;
+      drawFlashT = ctx.time;
       for (const c of boys) {
         if (!present(c) || c.cur) continue;
         c.drawCue = ctx.cue(c.p.id, { fx: 'go', word: 'DRAW!', bg: GREEN });
@@ -148,7 +147,7 @@ export const quickDraw: MinigameDef = {
       for (const c of boys) {
         if (!c.cur && c.drawCue && present(c)) {
           c.cur = { kind: 'miss', t: T.outSec };
-          c.popT = lastViewT;
+          c.popT = ctx.time;
           ctx.cue(c.p.id, { fx: 'bad', word: 'TOO SLOW', bg: '#555b6e' });
         }
         if (c.cur) c.shots[drawIdx] = c.cur;
@@ -178,7 +177,7 @@ export const quickDraw: MinigameDef = {
       const ms = e.ms ?? (ctx.time - drawAt) * 1000;
       const t = clamp(ms / 1000, 0.05, T.outSec);
       c.cur = { kind: 'ok', t };
-      c.popT = lastViewT;
+      c.popT = ctx.time;
       ctx.cue(c.p.id, { fx: 'good', word: `${t.toFixed(2)} s`, bg: GREEN });
       ctx.sfx('thud', { pan: (c.x / STAGE_W) * 2 - 1, vol: 0.5 });
     }
@@ -186,7 +185,7 @@ export const quickDraw: MinigameDef = {
     function out(c: Cowboy): void {
       c.cur = { kind: 'out', t: T.outSec };
       c.early++;
-      c.popT = lastViewT;
+      c.popT = ctx.time;
       ctx.cue(c.p.id, { fx: 'bad', word: 'OUT', bg: PAL.bad });
       ctx.sfx('buzz', { pan: (c.x / STAGE_W) * 2 - 1, vol: 0.7 });
     }
@@ -321,7 +320,7 @@ export const quickDraw: MinigameDef = {
     function drawFakes(g: CanvasRenderingContext2D, t: number): void {
       for (const f of fakes) {
         if (!f.fired) continue;
-        const dt = t - f.t0;
+        const dt = ctx.time - f.t0;
         if (f.kind === 'tumbleweed' && dt < 2.6) {
           const x = lerp(-120, STAGE_W + 120, dt / 2.6);
           const y = GROUND_Y + 40 - Math.abs(Math.sin(dt * 7)) * 50;
@@ -370,9 +369,9 @@ export const quickDraw: MinigameDef = {
       if (phase === 'wait') {
         // latest word fake wins the banner, else "wait for it…"
         let fw: Fake | null = null;
-        for (const f of fakes) if (f.fired && f.kind === 'word' && t - f.t0 < 0.9) fw = f;
+        for (const f of fakes) if (f.fired && f.kind === 'word' && ctx.time - f.t0 < 0.9) fw = f;
         if (fw) {
-          const k = ease.outBack(clamp01((t - fw.t0) / 0.18));
+          const k = ease.outBack(clamp01((ctx.time - fw.t0) / 0.18));
           drawText(g, fw.text, 960, y, 200 * k, '#ffb020');
         } else {
           const dots = '.'.repeat(1 + (Math.floor(t * 2.5) % 3));
@@ -381,7 +380,7 @@ export const quickDraw: MinigameDef = {
         return;
       }
       if (phase === 'draw') {
-        const k = ease.outBack(clamp01((t - drawFlashT) / 0.15));
+        const k = ease.outBack(clamp01((ctx.time - drawFlashT) / 0.15));
         drawText(g, 'DRAW!', 960, y, 240 * k, GREEN, { outline: 22 });
         return;
       }
@@ -465,7 +464,7 @@ export const quickDraw: MinigameDef = {
           for (const f of fakes) {
             if (!f.fired && now >= f.at) {
               f.fired = true;
-              f.t0 = lastViewT;
+              f.t0 = ctx.time;
               ctx.sfx(f.kind === 'tumbleweed' ? 'whoosh' : f.kind === 'crow' ? 'honk' : f.kind === 'bell' ? 'ding' : 'boing', { vol: 0.8 });
             }
           }
@@ -490,7 +489,6 @@ export const quickDraw: MinigameDef = {
       },
       render(g, v: RenderView) {
         const t = v.t;
-        lastViewT = t;
         if (!final && (phase === 'over' || v.phase === 'results')) {
           final = new Map();
           const ranked = rankBy(boys.filter(present).map((c) => ({ id: c.p.id, c, s: score(c) })), (x) => x.s.avg, true);
@@ -499,7 +497,7 @@ export const quickDraw: MinigameDef = {
         background(g);
         drawFakes(g, t);
         // DRAW flash
-        const fl = t - drawFlashT;
+        const fl = ctx.time - drawFlashT;
         if (fl < 0.35) {
           g.fillStyle = `rgba(255,255,255,${0.55 * (1 - fl / 0.35)})`;
           g.fillRect(0, 0, STAGE_W, STAGE_H);
@@ -510,7 +508,7 @@ export const quickDraw: MinigameDef = {
           const on = present(c);
           const isFast = final ? final.get(c)?.place === 1 : c === fastest && phase === 'reveal';
           const sway = phase === 'wait' ? Math.sin(t * 2 + c.idx) * 3 : 0;
-          const jump = c.cur?.kind === 'ok' ? Math.max(0, 1 - (t - c.popT) * 4) * 20 : 0;
+          const jump = c.cur?.kind === 'ok' ? Math.max(0, 1 - (ctx.time - c.popT) * 4) * 20 : 0;
           g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
           drawToken(g, c.p, c.x + sway, c.y - jump, tokenR, { dim: !on, touchBadge: false, ring: isFast ? PAL.gold : c.cur?.kind === 'out' ? PAL.bad : undefined });
           hat(g, c.x + sway, c.y - jump - tokenR * 0.8, tokenR, c.p.color);
@@ -525,7 +523,7 @@ export const quickDraw: MinigameDef = {
             const bg = fin.place === 1 ? '#b8860b' : fin.place === 2 ? '#6b7280' : fin.place === 3 ? '#9a5a2c' : 'rgba(0,0,0,0.55)';
             chip(g, fin.allOut ? 'OUT' : `#${fin.place} · ${fin.avg.toFixed(3)}`, c.x, sy, cs * 0.9, bg);
           } else if (c.cur) {
-            const pop = ease.outBack(clamp01((t - c.popT) / 0.2));
+            const pop = ease.outBack(clamp01((ctx.time - c.popT) / 0.2));
             if (c.cur.kind === 'ok') chip(g, `${c.cur.t.toFixed(3)}`, c.x, sy, cs * (0.6 + 0.4 * pop), isFast ? '#b8860b' : '#15803d');
             else if (c.cur.kind === 'out') chip(g, 'TOO EARLY!', c.x, sy, cs * 0.85 * (0.6 + 0.4 * pop), PAL.bad);
             else chip(g, 'MISS', c.x, sy, cs, '#555b6e');

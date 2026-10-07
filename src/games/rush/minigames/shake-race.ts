@@ -251,8 +251,8 @@ export const shakeRace: MinigameDef = {
       const tokenY = r.cy + r.ch / 2 - tokenR - Math.max(22, tokenR * 0.62) - 14;
       const bottomY = tokenY - tokenR - 16;
       const top = r.cy - r.ch / 2 + 12;
-      const H = Math.min(bottomY - top - 50, r.cw * 1.1, 520);
-      const W = Math.min(H * 0.48, r.cw * 0.3);
+      const H = Math.min(bottomY - top - 34, r.cw * 1.1, 520);
+      const W = Math.min(H * 0.48, r.cw * 0.34);
       const shake = r.finishAt === null ? Math.sin(t * 40 + r.idx) * 7 * r.eff : 0;
       const tilt = r.finishAt === null ? Math.sin(r.phase) * 0.12 * r.eff : 0;
       const bx = r.cx;

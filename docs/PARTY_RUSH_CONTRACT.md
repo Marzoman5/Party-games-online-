@@ -270,3 +270,7 @@ Durations are hard caps per heat [1,2,3] (seconds). "Scale" = behaviour at 1 / 2
   phone without re-firing the triple cue; `flick`/`tap`/`pose` events must carry `ms` + `c` whenever a cue
   is up; the `pose` stream must keep reporting the held pose (Copy the Pose relies on it when the player
   already holds the target pose).
+- LEAD: `drawEmoji` sets an opaque fillStyle (Chrome tints colour emoji with the fill alpha). Found by MG1.
+- MG1/MG2 deviations accepted: Don't Move! ranks by mean per-sample movement `a` (not `c`, which saturates
+  and is skewed by dropped packets); Hot Potato caps catch grace at 0.8 s past the fuse; Tilt Maze generates
+  seeded, length-checked layouts per round instead of hand-made ones; Quick Draw raise window 600 ms.
