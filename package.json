@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Kart Party - couch-multiplayer arcade kart racer. The game runs on a laptop/TV, phones are the controllers.",
+  "description": "Party Hub - Kart Party, Smash Party and Party Rush: couch-multiplayer party games. The game runs on a laptop/TV, phones are the controllers.",
   "license": "MIT",
   "scripts": {
     "start": "npm run build && node dist-server/server.mjs",
@@ -12,7 +12,9 @@
     "build": "vite build && node scripts/build-server.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "playwright test",
-    "bots": "tsx scripts/bots.ts"
+    "bots": "tsx scripts/bots.ts",
+    "test:motion": "tsx scripts/motion-selftest.ts",
+    "test:rush": "tsx scripts/rush-selftest.ts"
   },
   "dependencies": {
     "express": "^4.21.2",

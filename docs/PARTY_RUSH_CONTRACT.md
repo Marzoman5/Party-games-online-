@@ -100,7 +100,7 @@ server/Playwright run and never run the full Playwright suite concurrently with 
 | event | meaning | detector (phone) | touch fallback |
 |---|---|---|---|
 | `flick` | small quick wrist jerk in any direction (also "yank" / "cast" / "throw") | high-pass accel + gyro burst, low threshold so a small wrist motion always registers, 250 ms refractory | tap |
-| `raise` | phone came up from pointing at the floor to level | pitch crossing −45° → −20° within 400 ms | tap |
+| `raise` | phone came up from pointing at the floor to level | holstered below −45° for 0.2 s, then above −20° within 600 ms | tap |
 | `pose` | a new stable pose held ≥ 0.3 s (`v` = index) | gravity-only face classification | swipe ↑ upright, ↓ upside-down, ← left edge, → right edge, tap face-up, double-tap face-down |
 | `tap` | screen tapped (touch players; always allowed) | — | — |
 
