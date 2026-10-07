@@ -1,19 +1,22 @@
-# 🎉 Party Hub — Kart Party + Smash Party
+# 🎉 Party Hub — Kart Party + Smash Party + Party Rush
 
 > **Party quick start**
 > 1. Install [Node.js 18+](https://nodejs.org), then: `git checkout party-hub && npm install && npm start`
 > 2. The game opens in your browser — plug the laptop into the TV and press **F** (fullscreen).
 > 3. Everyone's phone on the **same Wi-Fi** as the laptop → scan the **QR code** on the TV.
-> 4. Pick a name + character, tap **READY**. The first player (👑 leader) picks **Kart Party** or **Smash Party** on their phone.
+> 4. Pick a name + character, tap **READY**. The first player (👑 leader) picks **Kart Party**, **Smash Party** or **⚡ Party Rush** on their phone.
 > 5. Leader taps **START**. After each match the leader picks **Rematch / Change Settings / Switch Game / Lobby**.
 
-Party Hub is a couch-multiplayer party app: the game runs on a laptop or TV, and **1–4 players use their
-phones as controllers** (a web page, nothing to install). Players join **once** and stay connected while
-the party switches between games:
+Party Hub is a couch-multiplayer party app: the game runs on a laptop or TV, and **up to 16 players use
+their phones as controllers** (a web page, nothing to install; Kart and Smash seat 4 at a time). Players
+join **once** and stay connected while the party switches between games:
 
 - **🏁 Kart Party** — arcade kart racer: 8 karts, 4 tracks, 13 items, drifting, Grand Prix, split-screen.
 - **🥊 Smash Party** — an original 2.5D platform fighter: damage %, knockback, blast-zone KOs, 8 fighters,
   3 stages (+ training), items, CPU fighters (levels 1–9), stock/time modes, 2v2 teams.
+- **⚡ Party Rush** — an endless, drop-in / drop-out stream of 10 fast **motion minigames** for 1–16
+  players: phones are one-handed motion controllers (shake, tilt, flick, freeze…), the TV shows everything.
+  Built for a loud room: join any time with one tap, 5-second explanations, no setup, never stalls.
 
 Everything is original and generated in code — no asset files, no web fonts, no internet needed at the
 party. No Nintendo names, characters, sprites, sounds or stage likenesses are used.
@@ -22,6 +25,7 @@ party. No Nintendo names, characters, sprites, sounds or stage likenesses are us
 
 ## Contents
 - [Party Hub flow](#party-hub-flow)
+- [⚡ Party Rush](#-party-rush) (quick start, the 10 games, host keys, settings, adding a minigame)
 - [Smash Party: controls](#smash-party-controls)
 - [Smash Party: mechanics](#smash-party-mechanics)
 - [Smash Party: fighters & movesets](#smash-party-fighters--movesets)
@@ -53,6 +57,102 @@ party. No Nintendo names, characters, sprites, sounds or stage likenesses are us
 
 Pause from any phone (⏸): the leader resumes/restarts/quits, others vote to resume. A phone that
 disconnects mid-match is handed to the AI/CPU; reopening the page on the same phone reclaims it.
+
+## ⚡ Party Rush
+
+An endless party show: a minigame is announced, everyone plays for 10–40 seconds with their phone as a
+motion controller, points fly onto a scoreboard, the next one starts — forever. Designed to be
+**drunk-playable**: one hand, one gesture, eyes on the TV, explained in 5 seconds, forgiving input, nobody
+can stall the party, nobody is punished for walking off to get a drink.
+
+### Quick start
+
+1. Start the server in **secure mode** so phones may use their motion sensors: double-click
+   **Start Party Hub (Tilt Steering)** (it runs `npm run start:https`). Without HTTPS everything still works,
+   but phones fall back to touch controls (the hub card and the scoreboard say so).
+2. On the TV pick **⚡ Party Rush** (leader's phone, or click the card). It starts immediately — no lobby,
+   no ready-up, no tutorial.
+3. Everyone scans the QR (always on the scoreboard, small in a corner during play) and taps **TAP TO PLAY**
+   once. That tap unlocks sound, asks iOS for motion permission and keeps the screen awake. The TV shows the
+   exact taps to get past the self-signed certificate warning on iPhone and Android.
+4. Hold the phone in one hand, upright, look at the TV. Joined mid-round? "You're in next round!".
+
+### The loop
+
+`scoreboard → UP NEXT card (≈5 s: name, one-line instruction, looping hand+phone animation on TV and phone)
+→ 3-2-1-GO → play (10–40 s) → results (≈6 s) → scoreboard`. Auto-advance is on (10 s ring). Every full pass
+through the games raises the **HEAT** (shorter, faster, never fussier); every 10 rounds there's a crown
+check. Scoring: among the N players who took part, 1st gets N points … last gets 1 (ties share, +2 for
+1st); the "last 5 rounds" column lets newcomers be on fire quickly. Someone idle for a whole round (or with
+the tab hidden / phone locked / Wi-Fi gone) is quietly marked away, skipped without penalty and back on
+their next tap — score kept. Alone? Two or three 🤖 bots join so every game still works.
+
+### The 10 minigames
+
+| | Game | Gesture | No motion sensors (👆 touch) |
+|---|---|---|---|
+| 🏃 | **Shake Race** — shake to run (or pump a balloon, or shake a soda bottle) | shake | mash the button |
+| 🤠 | **Quick Draw** — phone down… raise on DRAW! (best of 3, beware fake-outs) | point down, raise | tap on DRAW |
+| 🍽️ | **Balance** — keep the ball on your plate while the wobble grows | tilt | drag the pad |
+| 🌀 | **Tilt Maze** — roll your marble through a shared maze to the exit | tilt | drag the pad |
+| 💣 | **Hot Potato** — the bomb is ON your phone: flick it to someone else (3+ players) | small flick | tap |
+| 🧊 | **Don't Move!** — freeze while the TV tries to make you laugh | hold still | hold your thumb still |
+| 🪢 | **Tug of War** — random teams, pull on the drum beat (2+ players) | flick on the beat | tap on the beat |
+| 📱 | **Copy the Pose** — match the phone pose on screen, fastest wins | 6 gravity poses | swipe / tap / double-tap |
+| 🎣 | **Fishing** — flick to cast, buzz? YANK!, shake to reel | flick, shake | tap, mash |
+| 🎯 | **Darts** — aim with your wrist, flick to throw 3 darts | aim + flick | drag, tap to throw |
+
+Two games (Shake Race, Tug of War) show a "Hold your phone tight!" card first. All gestures are small wrist
+motions — detection thresholds are low so nobody learns to swing hard.
+
+### Host keys (any moment)
+
+`Space`/`Enter` next · `P` pause/resume · `S` skip this minigame · `R` replay the last one · `Esc` menu
+(settings, remove a player, back to the hub). The party leader can also press the big **NEXT** on their
+phone. **Settings** (persisted): auto-advance on/off + delay, which minigames are enabled, max heat, volume,
+**sip mode** (off by default: adds one light "sip or dare" line to the results, including regular water
+rounds; nothing mentions drinking when it's off), reset scores.
+
+### More than 4 people in Kart / Smash
+
+The party holds up to 16 phones. Kart Party and Smash Party still seat 4: the first 4 by join order play,
+everyone else's phone says "You're watching this one 👀" and the TV shows who is watching.
+
+### Tuning after a real party
+
+Motion feel can only be approximated by bots. All the knobs are in two files:
+- `src/games/rush/tuning.ts` — loop timings/scoring (`LOOP`) and one block per minigame (durations, speeds,
+  windows, per-heat values).
+- `src/phone/motion/tuning.ts` — gesture-detector thresholds (shake scale, flick threshold, table/still
+  noise floors, pose angles, tilt range, raise window, aim range).
+
+Try on real phones first: a small wrist flick in Hot Potato (should always register), shake energy in Shake
+Race (a brisk shake ≈ full speed), Don't Move! with the phone in hand vs. on a table, Copy the Pose face-down,
+Quick Draw holster + raise, and tilt direction in Balance. `__phone.motion.state()` in the phone's console
+shows the detected iOS sign / gyro units.
+
+### Adding an 11th minigame
+
+1. Create `src/games/rush/minigames/<id>.ts` exporting a `MinigameDef` (`meta` + `create()`; see
+   `src/games/rush/types.ts` — draw on the 1920×1080 stage, players only with `drawToken`) and a pure bot brain
+   `<id>.bot.ts` (`BotFactory`).
+2. Add one line to `src/games/rush/minigames/index.ts` and one to `src/games/rush/bots.ts`, and a tuning block.
+3. `npm run test:rush` (headless: 1–16 players, heat 1–3, leavers, touch players), then look at it with the
+   dev harness: `npx vite`, open `/src/games/rush/dev/harness.html?game=<id>&players=16`
+   (or `npx tsx scripts/rush-shot.ts --game <id> --players 16 --at 8`).
+If it needs a new phone gesture, add a detector in `src/phone/motion/` + a touch fallback in
+`src/phone/rush/touch.ts` and extend `RushStream`/`RushEvent` in the protocol.
+
+### How it fits the engine
+
+Party Rush is a `GameModule` with `dropIn = true` (`src/games/rush/RushModule.ts`): the session skips
+lobby/tutorial/setup/results, puts everyone on screen `race`, and hands the module player events, `{t:'mg'}`
+messages and tag-2 stream packets by playerId. The shell (`src/games/rush/shell/`) owns the loop, scoring,
+roster/away, solo bots, phone sync, audio and the TV views; each minigame is an isolated plug-in. The phone
+(`src/phone/rush/`) is a generic, data-driven controller: the host tells it which sensor stream and gestures
+to detect (`src/phone/motion/`), what giant word to show and when to fire a cue (full-screen flash + sound +
+vibration — iOS has no vibration, so never the only cue). Reaction times are measured on the phone, so Wi-Fi
+jitter doesn't decide Quick Draw. Full contract: `docs/PARTY_RUSH_CONTRACT.md`.
 
 ## Smash Party controls
 
