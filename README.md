@@ -558,7 +558,8 @@ npm run preview:static          # build + serve it locally like GitHub Pages (ht
 npm test            # both Playwright projects (headless Chromium):
 npx playwright test --project=ws    #   the `npm start` route (Node server, bot phones + real phone pages)
 npx playwright test --project=rtc   #   the website route (static build, real phone pages over WebRTC)
-npm run test:live   # join + every game against the DEPLOYED site with the real public services (KP_LIVE_URL=… to point elsewhere)
+npm run test:live   # join + every game against the DEPLOYED site with the real public services (KP_LIVE_URL=… to point elsewhere);
+                    # also runs automatically on GitHub after every deploy (Actions → "Live check")
 npm run bots -- --url http://localhost:3000 --n 4   # 4 simulated phones play against a real host
 npm run bots -- --url http://localhost:3000 --n 4 --game smash   # ...the Smash Party loop
 npx tsx src/games/smash/sim/dev/selftest.ts         # Smash simulation self-test (knockback, all moves, rules)
