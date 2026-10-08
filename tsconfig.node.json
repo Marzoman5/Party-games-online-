@@ -12,5 +12,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["server", "scripts", "tests", "playwright.config.ts", "src/net/protocol.ts"]
+  "include": ["server", "scripts", "tests", "playwright.config.ts", "src/net/protocol.ts", "src/net/hub.ts"]
 }

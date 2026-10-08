@@ -141,6 +141,11 @@ export class PartySession {
   https = false;
   netStatus: NetStatus = 'connecting';
   hostedOnce = false;
+  /** 'ws' = Node server relay; 'rtc' = static site, this page is the room server (WebRTC). */
+  transport: 'ws' | 'rtc' = 'ws';
+  /** WebRTC only: can phones reach this page through a signalling service right now? */
+  joinService: 'n/a' | 'connecting' | 'ok' | 'down' = 'n/a';
+  private joinServiceTimer = 0;
 
   players: PlayerRec[] = [];
   tipsEnabled = true;
@@ -314,6 +319,28 @@ export class PartySession {
       // stale input. Leader (or the host mouse) resumes once everyone's back.
       this.doPause('Connection lost');
     }
+    this.changed();
+  }
+
+  /**
+   * WebRTC: a signalling service is up (phones can join) or not. Phones already connected are
+   * unaffected (their link is direct), so this never pauses a match; it only shows a notice.
+   */
+  onJoinService(anyUp: boolean): void {
+    window.clearTimeout(this.joinServiceTimer);
+    if (anyUp) {
+      if (this.joinService === 'down') this.toast('Phones can join again', 'info');
+      this.joinService = 'ok';
+      this.changed();
+      return;
+    }
+    if (this.joinService === 'n/a') this.joinService = 'connecting';
+    // Brief blips (a relay reconnecting) are not worth a warning.
+    this.joinServiceTimer = window.setTimeout(() => {
+      if (this.joinService === 'ok') this.toast('Joining service unreachable: new phones can’t join right now', 'error');
+      this.joinService = 'down';
+      this.changed();
+    }, this.joinService === 'connecting' ? 8000 : 4000);
     this.changed();
   }
 

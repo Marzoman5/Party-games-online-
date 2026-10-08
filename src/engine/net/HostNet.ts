@@ -1,5 +1,6 @@
 /**
- * HostNet — the host page's single WebSocket to the relay server.
+ * HostNet — the host page's single link to the relay (a WebSocket to the Node server, or the
+ * in-page WebRTC room server on the static site; see src/net/link.ts).
  *
  * - Sends `host_hello` with the room + hostToken saved in sessionStorage, so a host reload
  *   (or a server blip) reclaims the same room code and its players.
@@ -22,6 +23,7 @@ import {
   type ServerError,
   type ServerToHost,
 } from '../../net/protocol';
+import type { Link, LinkFactory } from '../../net/link';
 import {
   PING_MS,
   PING_TIMEOUT_MS,
@@ -57,7 +59,7 @@ export interface NetPort {
 const CLOSE_REPLACED = 4001;
 
 export class HostNet implements NetPort {
-  private ws: WebSocket | null = null;
+  private ws: Link | null = null;
   private status: NetStatus = 'connecting';
   private retryMs = RECONNECT_MIN_MS;
   private retryTimer = 0;
@@ -69,12 +71,12 @@ export class HostNet implements NetPort {
   private disposed = false;
 
   constructor(
-    private readonly url: string,
+    private readonly openLink: LinkFactory,
     private readonly handler: HostNetHandler,
   ) {}
 
   get isOpen(): boolean {
-    return this.status === 'open' && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+    return this.status === 'open' && this.ws !== null && this.ws.isOpen;
   }
 
   get currentStatus(): NetStatus {
@@ -87,9 +89,9 @@ export class HostNet implements NetPort {
     this.retryTimer = 0;
     this.teardownSocket();
     this.setStatus('connecting');
-    let ws: WebSocket;
+    let ws: Link;
     try {
-      ws = new WebSocket(this.url);
+      ws = this.openLink();
     } catch (err) {
       console.warn('[HostNet] cannot open socket', err);
       this.scheduleReconnect();
@@ -110,10 +112,10 @@ export class HostNet implements NetPort {
       this.lastPingTick = 0;
       this.pingTimer = window.setInterval(this.ping, PING_MS);
     };
-    ws.onmessage = (ev) => {
+    ws.onmessage = (data) => {
       if (this.ws !== ws) return;
       this.lastHeard = performance.now();
-      if (typeof ev.data === 'string') this.onFrame(ev.data);
+      this.onFrame(data);
     };
     ws.onclose = (ev) => {
       if (this.ws !== ws) return;
@@ -125,9 +127,6 @@ export class HostNet implements NetPort {
         return;
       }
       this.scheduleReconnect();
-    };
-    ws.onerror = () => {
-      /* onclose follows */
     };
   }
 
@@ -222,13 +221,13 @@ export class HostNet implements NetPort {
 
   private readonly ping = (): void => {
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || !ws.isOpen) return;
     const now = performance.now();
     // If this timer itself fired late, the page was stalled (heavy frame, background tab, sleep):
     // queued frames may not have been processed yet, so don't judge the socket on this tick.
     const stalled = this.lastPingTick > 0 && now - this.lastPingTick > PING_MS * 2;
     this.lastPingTick = now;
-    if (stalled) {
+    if (stalled || ws.local) {
       this.lastHeard = Math.max(this.lastHeard, now - PING_MS);
     } else if (now - this.lastHeard > PING_TIMEOUT_MS) {
       // Silent socket (sleep / Wi-Fi drop): force a reconnect.
@@ -242,7 +241,7 @@ export class HostNet implements NetPort {
 
   private rawSend(s: string): void {
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || !ws.isOpen) return;
     try {
       ws.send(s);
     } catch {
@@ -265,7 +264,7 @@ export class HostNet implements NetPort {
     window.clearInterval(this.pingTimer);
     this.pingTimer = 0;
     if (!ws) return;
-    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+    ws.onopen = ws.onmessage = ws.onclose = null;
     try {
       ws.close();
     } catch {

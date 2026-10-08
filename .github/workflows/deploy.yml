@@ -1,0 +1,51 @@
+# Every push to main builds the static site and deploys it to GitHub Pages.
+# Optional repository variables (Settings -> Secrets and variables -> Actions -> Variables):
+#   ICE_SERVERS  JSON list of STUN/TURN servers, e.g. to add a TURN server (see src/net/rtc/config.ts)
+#   PEERJS       PeerJS signalling server URLs (comma-separated)
+#   NOSTR        Nostr relay URLs (comma-separated)
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build:static
+        env:
+          STATIC_BASE: /${{ github.event.repository.name }}/
+          VITE_ICE_SERVERS: ${{ vars.ICE_SERVERS }}
+          VITE_PEERJS: ${{ vars.PEERJS }}
+          VITE_NOSTR: ${{ vars.NOSTR }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-static
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

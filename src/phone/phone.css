@@ -2377,3 +2377,11 @@ button {
   min-height: 56px;
   font-size: 16px;
 }
+
+/* Release version under the room-code entry (small). */
+.app-version {
+  margin-top: 14px;
+  font-size: 11px;
+  opacity: 0.4;
+  text-align: center;
+}

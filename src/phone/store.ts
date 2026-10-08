@@ -1,6 +1,14 @@
 /** Tiny observable app store: connection + latest host snapshots. */
 import type { GameId, PhoneFightStatus, PhoneRaceStatus, PhoneState, RushPhoneMsg, ServerError } from '../net/protocol';
 
+/** Phone-local connection errors of the WebRTC transport (never on the wire; see ErrorView). */
+export interface LinkError {
+  t: 'error';
+  /** no_direct: the WebRTC connection to the host failed. no_signal: the joining services are unreachable. */
+  code: 'no_direct' | 'no_signal';
+  message: string;
+}
+
 export type ConnPhase = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface AppState {
@@ -15,7 +23,7 @@ export interface AppState {
   /** Host page connected to the server (from `host` messages). */
   hostConnected: boolean;
   /** Fatal-ish error from the server that stops auto-reconnect. */
-  error: ServerError | null;
+  error: ServerError | LinkError | null;
   phone: PhoneState | null;
   race: PhoneRaceStatus | null;
   /** performance.now() of the last race status. */

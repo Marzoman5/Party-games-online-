@@ -1,0 +1,54 @@
+# Pull request checks: typecheck, both builds, and the end-to-end suites
+# (WebSocket / `npm start` path in two shards, WebRTC / static-site path).
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run build:static
+      - name: Unit self-tests
+        run: npm run test:motion && npm run test:rush
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ws 1/2
+            args: --project=ws --shard=1/2
+          - name: ws 2/2
+            args: --project=ws --shard=2/2
+          - name: rtc
+            args: --project=rtc
+    name: e2e (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test ${{ matrix.args }}

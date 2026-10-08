@@ -10,6 +10,8 @@ import type { GameModule } from '../engine/GameModule';
 import { resolveApiBase, resolveWsUrl } from '../engine/config';
 import { Display } from '../engine/display';
 import { HostNet } from '../engine/net/HostNet';
+import { RoomServer } from '../engine/net/rtc/RoomServer';
+import { transportKind, wsLink, type LinkFactory } from '../net/link';
 import { PartySession } from '../engine/PartySession';
 import { HostUI } from './ui/HostUI';
 import { armSfx } from './ui/sfx';
@@ -30,6 +32,10 @@ export interface PartyState {
   racesCompleted: number;
   // extras
   net: string;
+  /** 'ws' (Node server) or 'rtc' (static site, WebRTC). */
+  transport: 'ws' | 'rtc';
+  /** WebRTC: signalling availability ('n/a' with the Node server). */
+  joinService: string;
   soloActive: boolean;
   tipsEnabled: boolean;
   results: PhoneState['results'];
@@ -57,6 +63,8 @@ export interface PartyHooks {
   pickGame(id: GameId): Promise<boolean>;
   /** Host Esc on the sandbox. */
   skipSandbox(): void;
+  /** WebRTC room server internals (null with the Node server). */
+  rtc(): ReturnType<RoomServer['debug']> | null;
 }
 
 declare global {
@@ -74,6 +82,8 @@ export interface PartyAppOptions {
 export class PartyApp {
   readonly session: PartySession;
   readonly net: HostNet;
+  /** Static site only: this page's in-browser room server (WebRTC). Null with the Node server. */
+  readonly roomServer: RoomServer | null;
   readonly display: Display;
   readonly ui: HostUI;
   private readonly offs: (() => void)[] = [];
@@ -82,12 +92,23 @@ export class PartyApp {
     readonly modules: GameModule[],
     opts: PartyAppOptions = {},
   ) {
-    const wsUrl = opts.wsUrl ?? resolveWsUrl();
-    const apiBase = resolveApiBase(wsUrl);
+    // Transport: WebSocket to the Node server (`npm start`), or this page as the room server with
+    // phones connected over WebRTC (static site). Everything below is the same for both.
+    let openLink: LinkFactory;
+    let apiBase = '';
+    if (transportKind() === 'rtc') {
+      this.roomServer = new RoomServer();
+      openLink = this.roomServer.link;
+    } else {
+      this.roomServer = null;
+      const wsUrl = opts.wsUrl ?? resolveWsUrl();
+      apiBase = resolveApiBase(wsUrl);
+      openLink = () => wsLink(wsUrl);
+    }
 
     // The session needs the net port and the net needs the session's handlers: late-bind.
     let session!: PartySession;
-    this.net = new HostNet(wsUrl, {
+    this.net = new HostNet(openLink, {
       onHosted: (w, first) => session.onHosted(w, first),
       onPlayerJoined: (p, rejoin) => session.onPlayerJoined(p, rejoin),
       onPlayerLeft: (p) => session.onPlayerLeft(p),
@@ -100,6 +121,8 @@ export class PartyApp {
     });
     session = new PartySession(modules, this.net, 'kart');
     this.session = session;
+    session.transport = this.roomServer ? 'rtc' : 'ws';
+    if (this.roomServer) this.roomServer.onstatus = (st) => session.onJoinService(st.anyUp);
     this.display = new Display((on) => {
       for (const m of modules) {
         if (!m.loaded) continue;
@@ -223,6 +246,8 @@ export class PartyApp {
           gp: s.gpView,
           racesCompleted: s.racesCompleted,
           net: s.netStatus,
+          transport: s.transport,
+          joinService: s.joinService,
           soloActive: s.soloActive,
           tipsEnabled: s.tipsEnabled,
           results: r ? { rows: r.rows, gpFinal: r.gpFinal } : null,
@@ -254,6 +279,7 @@ export class PartyApp {
         return s.switchGame(id, where === 'setup' || where === 'results');
       },
       skipSandbox: () => s.hostSkipSandbox(),
+      rtc: () => this.roomServer?.debug() ?? null,
     };
   }
 
@@ -261,6 +287,7 @@ export class PartyApp {
     for (const off of this.offs) off();
     this.offs.length = 0;
     this.net.dispose();
+    this.roomServer?.dispose();
     this.session.dispose();
     this.display.dispose();
     this.ui.dispose();
