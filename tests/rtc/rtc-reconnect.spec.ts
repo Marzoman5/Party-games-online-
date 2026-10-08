@@ -95,8 +95,9 @@ test('second host tab takes the room over; the first can take it back', async ({
     // The first tab stepped down, like with the Node server.
     await waitHost(page, `s.net === 'replaced'`, 20_000);
     await expect(page.locator('.kp-replaced.kp-on')).toBeVisible();
-    // The phone is now driven by tab 2.
-    const was = t2.players[0].ready;
+    // The phone is now driven by tab 2 (once it has rejoined it and shows the lobby again).
+    await waitPhone(phone, `p.connected && p.screen === 'lobby'`, 30_000);
+    const was = (await hostState(tab2)).players[0].ready;
     await phone.getByTestId('btn-ready').tap();
     await waitHost(tab2, `s.players[0].ready === ${!was}`, 20_000);
 
