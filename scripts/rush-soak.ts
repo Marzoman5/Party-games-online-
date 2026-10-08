@@ -24,7 +24,7 @@
  *   --no-reload     never reload the host page
  *   --patient       don't press Space on UP NEXT / results (real-time loop, slower)
  *   --seed N        RNG seed (default 1)
- *   --out FILE      write the JSON summary there (default: stdout only)
+ *   --out FILE      write the JSON summary there (also an interim one every 10 rounds; default: stdout only)
  *   --headed        show the host browser
  *
  * Progress: one line per completed round on stdout ([soak] …). Run it in the background and tail the output.
@@ -298,6 +298,46 @@ async function main(): Promise<void> {
     }
   };
 
+  // ---------------------------------------------------------------- summary (also written every 10 rounds)
+  const buildSummary = async (): Promise<Record<string, unknown>> => {
+    const secs = (Date.now() - t0) / 1000;
+    const allBots = [...bots, ...retired];
+    const botIn = allBots.reduce((a, b) => a + b.bytesIn, 0);
+    const botOut = allBots.reduce((a, b) => a + b.bytesOut, 0);
+    const fin = await page.evaluate(() => (window as unknown as RW).__rush!.getState()).catch(() => null);
+    return {
+      ok: failures.length === 0 && resultsSeen >= ROUNDS,
+      rounds: resultsSeen,
+      target: ROUNDS,
+      minutes: +(secs / 60).toFixed(1),
+      roundsPerHour: +((resultsSeen / secs) * 3600).toFixed(1),
+      bots: NBOTS,
+      phases: phaseCount,
+      maxPhaseSeconds: Object.fromEntries(Object.entries(maxPhase).map(([k, v]) => [k, +v.toFixed(1)])),
+      games,
+      heatAtResults: heats,
+      keys: keyCount,
+      chaos: chaosCount,
+      reloads,
+      pageErrors,
+      shellErrors: fin?.errors ?? null,
+      traffic: {
+        hostInBytesPerSec: Math.round(traffic.hostIn / secs),
+        hostOutBytesPerSec: Math.round(traffic.hostOut / secs),
+        hostFramesInPerSec: +(traffic.framesIn / secs).toFixed(1),
+        hostFramesOutPerSec: +(traffic.framesOut / secs).toFixed(1),
+        largestHostFrameIn: traffic.hostMaxIn,
+        largestHostFrameOut: traffic.hostMaxOut,
+        botsInBytesPerSec: Math.round(botIn / secs),
+        botsOutBytesPerSec: Math.round(botOut / secs),
+        largestPhoneMessage: Math.max(maxPhoneMsg, ...allBots.map((b) => b.maxMsgIn)),
+        shellMaxPhoneMsg: fin?.msgBytes.max ?? null,
+      },
+      finalBoard: fin ? fin.players.filter((p) => !p.bot).map((p) => `${p.id}:${p.pts}:${p.st}`) : null,
+      failures: failures.slice(0, 100),
+    };
+  };
+
   // ---------------------------------------------------------------- watcher loop
   let cur = '';
   let acc = 0;
@@ -363,6 +403,7 @@ async function main(): Promise<void> {
       if (lastRoundsPlayed >= 0 && st.roundsPlayed !== lastRoundsPlayed + 1) fail(`roundsPlayed jumped ${lastRoundsPlayed} → ${st.roundsPlayed}`);
       lastRoundsPlayed = st.roundsPlayed;
       const el = (Date.now() - t0) / 1000;
+      if (OUT && resultsSeen % 10 === 0) void buildSummary().then((x) => fs.writeFileSync(OUT, JSON.stringify({ interim: true, ...x }, null, 2))).catch(() => undefined);
       log(`round ${resultsSeen}/${ROUNDS} #${res.round} ${res.game} heat ${st.heat} rows=${res.rows.length} players=${st.players.filter((p) => !p.bot).length} present=${present} rate=${((resultsSeen / el) * 3600).toFixed(0)}/h fails=${failures.length}`);
     }
     // all-time points = sum of awards (only check on a calm scoreboard: lastResults already counted)
@@ -421,43 +462,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ---------------------------------------------------------------- summary
-  const secs = (Date.now() - t0) / 1000;
-  const allBots = [...bots, ...retired];
-  const botIn = allBots.reduce((a, b) => a + b.bytesIn, 0);
-  const botOut = allBots.reduce((a, b) => a + b.bytesOut, 0);
-  const fin = await page.evaluate(() => (window as unknown as RW).__rush!.getState()).catch(() => null);
-  const summary = {
-    ok: failures.length === 0 && resultsSeen >= ROUNDS,
-    rounds: resultsSeen,
-    target: ROUNDS,
-    minutes: +(secs / 60).toFixed(1),
-    roundsPerHour: +((resultsSeen / secs) * 3600).toFixed(1),
-    bots: NBOTS,
-    phases: phaseCount,
-    maxPhaseSeconds: Object.fromEntries(Object.entries(maxPhase).map(([k, v]) => [k, +v.toFixed(1)])),
-    games,
-    heatAtResults: heats,
-    keys: keyCount,
-    chaos: chaosCount,
-    reloads,
-    pageErrors,
-    shellErrors: fin?.errors ?? null,
-    traffic: {
-      hostInBytesPerSec: Math.round(traffic.hostIn / secs),
-      hostOutBytesPerSec: Math.round(traffic.hostOut / secs),
-      hostFramesInPerSec: +(traffic.framesIn / secs).toFixed(1),
-      hostFramesOutPerSec: +(traffic.framesOut / secs).toFixed(1),
-      largestHostFrameIn: traffic.hostMaxIn,
-      largestHostFrameOut: traffic.hostMaxOut,
-      botsInBytesPerSec: Math.round(botIn / secs),
-      botsOutBytesPerSec: Math.round(botOut / secs),
-      largestPhoneMessage: Math.max(maxPhoneMsg, ...allBots.map((b) => b.maxMsgIn)),
-      shellMaxPhoneMsg: fin?.msgBytes.max ?? null,
-    },
-    finalBoard: fin ? fin.players.filter((p) => !p.bot).map((p) => `${p.id}:${p.pts}:${p.st}`) : null,
-    failures: failures.slice(0, 100),
-  };
+  const summary = await buildSummary();
   const json = JSON.stringify(summary, null, 2);
   console.log(json);
   if (OUT) fs.writeFileSync(OUT, json);
