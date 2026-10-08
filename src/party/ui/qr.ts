@@ -1,7 +1,8 @@
 /**
- * QR code image served by the relay (`/api/qr.svg?data=`), with a graceful fallback when the
- * endpoint is missing (e.g. Vite dev server) or the server is unreachable: the URL text stays.
+ * QR code image, generated in the browser (no server needed, so it works on the static site and
+ * offline), with a graceful fallback if generation fails: the URL text stays.
  */
+import QRCode from 'qrcode';
 import { h } from './dom';
 
 export class QrView {
@@ -10,8 +11,12 @@ export class QrView {
   private readonly fallback: HTMLDivElement;
   private data = '';
 
+  /**
+   * `_apiBase` is unused since QR codes are made in the browser; it stays in the signature because game
+   * modules receive it through their context (GameModule ctx.apiBase).
+   */
   constructor(
-    private readonly apiBase: string,
+    _apiBase: string,
     cls: string,
     testId?: string,
   ) {
@@ -35,7 +40,13 @@ export class QrView {
       this.img.removeAttribute('src');
       return;
     }
-    this.img.src = `${this.apiBase}/api/qr.svg?data=${encodeURIComponent(data)}`;
+    QRCode.toString(data, { type: 'svg', margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } })
+      .then((svg) => {
+        if (this.data === data) this.img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      })
+      .catch(() => {
+        if (this.data === data) this.root.classList.add('kp-qr-failed');
+      });
   }
 }
 

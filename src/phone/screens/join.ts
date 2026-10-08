@@ -60,6 +60,7 @@ export class JoinView implements View {
         this.msg,
         h('div', { class: 'join-label', text: 'Enter the 4-letter code shown on the TV' }),
         h('div', { class: 'join-row' }, this.input, this.go),
+        h('div', { class: 'app-version', testid: 'app-version', text: `v${__APP_VERSION__}` }),
       ),
     );
   }
@@ -141,6 +142,14 @@ export class ErrorView implements View {
       title = 'Update needed';
       text = 'The game was updated. Reload to get the latest controller.';
       retry = 'Reload';
+    } else if (code === 'no_direct') {
+      icon = '📶';
+      title = 'Can’t connect to the game';
+      text = e?.message || '';
+    } else if (code === 'no_signal') {
+      icon = '📡';
+      title = 'You seem to be offline';
+      text = e?.message || '';
     } else if (code === 'kicked') {
       icon = '👋';
       title = 'You left the party';

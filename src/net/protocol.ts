@@ -8,6 +8,8 @@
  * Topology: phones <-> server <-> host (one WebSocket each, path WS_PATH).
  * The server is a dumb relay plus identity registry (room code, player ids,
  * reconnect tokens). The HOST browser is authoritative for all game state.
+ * On the static website the "server" (src/net/hub.ts) runs inside the host page
+ * and phones reach it over WebRTC data channels; the messages are the same.
  *
  * Encoding: every frame is JSON text. Input packets are a compact JSON array
  * (see InputPacket) so they're tiny and fast to parse at ~60 Hz per phone.

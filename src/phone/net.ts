@@ -1,6 +1,7 @@
 /**
- * WebSocket connection to the relay server: join/reclaim, ping, auto-reconnect.
- * Implements the phone side of src/net/protocol.ts exactly.
+ * Connection to the relay: join/reclaim, ping, auto-reconnect. Implements the phone side of
+ * src/net/protocol.ts exactly, over a `Link` (src/net/link.ts): a WebSocket to the Node server, or a
+ * direct WebRTC data channel to the host page on the static site (./rtcLink.ts).
  */
 import {
   PROTOCOL_VERSION,
@@ -8,11 +9,14 @@ import {
   type FightInputPacket,
   type InputPacket,
   type PhoneToHost,
+  type ServerError,
   type ServerToPhone,
   type StreamPacket,
 } from '../net/protocol';
+import { transportKind, wsLink, type Link, type LinkClose } from '../net/link';
+import { openRtcLink, RTC_CLOSE_NO_DIRECT, RTC_CLOSE_NO_ROOM, RTC_CLOSE_NO_SIGNAL } from './rtcLink';
 import { lsGet, lsSet } from './settings';
-import { setState, state } from './store';
+import { setState, state, type LinkError } from './store';
 
 type MsgHandler = (m: ServerToPhone) => void;
 
@@ -49,8 +53,18 @@ function wsUrl(): string {
   return `${proto}://${location.host}${WS_PATH}`;
 }
 
+/** Close codes of the WebRTC link that mean "stop retrying and tell the player". */
+const LINK_ERRORS: Record<number, LinkError['code']> = {
+  [RTC_CLOSE_NO_DIRECT]: 'no_direct',
+  [RTC_CLOSE_NO_SIGNAL]: 'no_signal',
+};
+
 export class Net {
-  private ws: WebSocket | null = null;
+  private ws: Link | null = null;
+  /** Ever joined in this page (a WebRTC "room not found" is then a host reload, not a typo). */
+  private everJoined = false;
+  private readonly openLink: (room: string) => Link =
+    transportKind() === 'rtc' ? (room) => openRtcLink(room) : () => wsLink(wsUrl());
   private attempt = 0;
   private reconnectTimer = 0;
   private pingTimer = 0;
@@ -65,14 +79,14 @@ export class Net {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || this.halted) return;
       // iOS freezes/kills sockets in the background: check right away when we come back.
-      if (!this.ws || this.ws.readyState > 1 || performance.now() - this.lastRx > STALE_MS) {
+      if (!this.ws || !this.ws.isOpen || performance.now() - this.lastRx > STALE_MS) {
         this.reconnectNow();
       } else {
         this.ping();
       }
     });
     window.addEventListener('online', () => {
-      if (!this.halted && (!this.ws || this.ws.readyState > 1)) this.reconnectNow();
+      if (!this.halted && (!this.ws || !this.ws.isOpen)) this.reconnectNow();
     });
   }
 
@@ -104,11 +118,11 @@ export class Net {
   }
 
   get isOpen(): boolean {
-    return !!this.ws && this.ws.readyState === WebSocket.OPEN && state.joined;
+    return !!this.ws && this.ws.isOpen && state.joined;
   }
 
   send(m: PhoneToHost): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && state.joined) {
+    if (this.ws && this.ws.isOpen && state.joined) {
       try {
         this.ws.send(JSON.stringify(m));
       } catch {
@@ -118,7 +132,7 @@ export class Net {
   }
 
   sendInput(p: InputPacket | FightInputPacket | StreamPacket): boolean {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && state.joined) {
+    if (this.ws && this.ws.isOpen && state.joined) {
       try {
         this.ws.send(JSON.stringify(p));
         return true;
@@ -136,7 +150,7 @@ export class Net {
     this.ws = null;
     clearInterval(this.pingTimer);
     if (ws) {
-      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.onopen = ws.onmessage = ws.onclose = null;
       try {
         ws.close();
       } catch {
@@ -149,9 +163,9 @@ export class Net {
     if (this.halted || !state.room) return;
     this.closeSocket();
     setState({ conn: state.phone ? 'reconnecting' : 'connecting', joined: false });
-    let ws: WebSocket;
+    let ws: Link;
     try {
-      ws = new WebSocket(wsUrl());
+      ws = this.openLink(state.room);
     } catch {
       this.scheduleReconnect();
       return;
@@ -173,32 +187,61 @@ export class Net {
       clearInterval(this.pingTimer);
       this.pingTimer = window.setInterval(() => this.tick(), PING_MS);
     };
-    ws.onmessage = (ev) => {
+    ws.onmessage = (data) => {
       if (this.ws !== ws) return;
       this.lastRx = performance.now();
       let m: ServerToPhone;
       try {
-        m = JSON.parse(typeof ev.data === 'string' ? ev.data : '') as ServerToPhone;
+        m = JSON.parse(data) as ServerToPhone;
       } catch {
         return;
       }
       if (!m || typeof m !== 'object' || Array.isArray(m)) return;
       this.handle(m);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.ws !== ws) return;
       this.ws = null;
       clearInterval(this.pingTimer);
       setState({ joined: false });
+      if (this.linkFailed(ev)) return;
       this.scheduleReconnect();
-    };
-    ws.onerror = () => {
-      /* onclose follows */
     };
   }
 
+  /**
+   * WebRTC link failures that need the player (blocked direct connection, joining service down, or a
+   * room code nobody hosts). Returns true if handled (auto-reconnect stopped, error screen shown).
+   */
+  private linkFailed(ev: LinkClose): boolean {
+    if (ev.code === RTC_CLOSE_NO_ROOM) {
+      // The host page is the room: during a host reload it is briefly unreachable. A phone that was
+      // already in this party keeps retrying (with the "game screen disconnected" banner); a fresh
+      // join with a wrong code gets the same "room not found" screen as the Node server gives.
+      if (this.everJoined) {
+        setState({ hostConnected: false });
+        return false;
+      }
+      this.stop({ t: 'error', code: 'no_room', message: `Room ${state.room} not found. Check the code on the TV.` });
+      return true;
+    }
+    const code = LINK_ERRORS[ev.code];
+    if (!code) return false;
+    // Signalling is only needed to (re)connect: a phone already in the party keeps trying quietly.
+    if (code === 'no_signal' && this.everJoined) return false;
+    this.stop({ t: 'error', code, message: ev.reason });
+    return true;
+  }
+
+  private stop(error: ServerError | LinkError): void {
+    this.halted = true;
+    clearTimeout(this.reconnectTimer);
+    this.closeSocket();
+    setState({ error, conn: 'closed', joined: false });
+  }
+
   private tick(): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws || !this.ws.isOpen) return;
     if (performance.now() - this.lastRx > STALE_MS) {
       // Half-open socket: tear it down and reconnect.
       this.closeSocket();
@@ -210,7 +253,7 @@ export class Net {
   }
 
   private ping(): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws || !this.ws.isOpen) return;
     const id = ++this.pingId;
     this.pingSent.set(id, performance.now());
     if (this.pingSent.size > 8) {
@@ -241,6 +284,7 @@ export class Net {
     switch (m.t) {
       case 'joined': {
         this.attempt = 0;
+        this.everJoined = true;
         const room = m.room ? m.room.toUpperCase() : state.room;
         lsSet(tokenKey(room), m.token);
         lsSet('kp.lastRoom', room);

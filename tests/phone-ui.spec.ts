@@ -218,6 +218,12 @@ for (const dev of DEVICES) {
           if (k.lastSteer > 0.3) sawSteer = true;
           if (i % 5 === 0) samples.push(`a${attempt} spd=${k.speed.toFixed(1)} steer=${k.lastSteer.toFixed(2)} drift=${k.isDrifting} spin=${k.isSpinning}`);
           drifted = k.isDrifting || k.driftStage > 0;
+          // A drift starts from a fresh DRIFT press (hop) at drift speed. If the first press landed just
+          // below it (the speed threshold above is borderline), press again like a player would.
+          if (!drifted && i % 4 === 3 && k.speed > 13) {
+            await touch(cdp, 'touchStart', [{ x: zc.x + 200, y: zc.y, id: 10 }]);
+            await touch(cdp, 'touchStart', [{ x: zc.x + 200, y: zc.y, id: 10 }, { ...dc, id: 11 }]);
+          }
           if (!drifted) await sleep(500);
         }
         if (drifted) await shot(phone, p('05-race-steer-drift'));

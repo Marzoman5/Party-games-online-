@@ -10,6 +10,8 @@
     "start:https": "npm run build && node dist-server/server.mjs --https",
     "serve": "node dist-server/server.mjs",
     "build": "vite build && node scripts/build-server.mjs",
+    "build:static": "node scripts/build-static.mjs",
+    "preview:static": "node scripts/build-static.mjs && node scripts/serve-static.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "playwright test",
     "bots": "tsx scripts/bots.ts",
@@ -17,6 +19,8 @@
     "test:rush": "tsx scripts/rush-selftest.ts"
   },
   "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "express": "^4.21.2",
     "qrcode": "^1.5.4",
     "selfsigned": "^2.4.1",
@@ -31,6 +35,7 @@
     "@types/three": "^0.185.4",
     "@types/ws": "^8.5.13",
     "esbuild": "^0.28.0",
+    "peer": "^1.0.2",
     "tsx": "^4.19.2",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"

@@ -108,7 +108,8 @@ for (const dev of PHONES) {
       const rid2 = await startRound(page, phone, 'darts');
       await expect(phone.getByTestId('rush-touch-aim')).toBeVisible();
       const aim = await centerOf(phone, 'rush-touch-pad');
-      const flicks0 = (await phoneRush(phone)).rushSent.events.flick ?? 0;
+      // Darts throws on a `tap` event (aim by tilt or drag, tap to throw; since "Party Rush pass 3").
+      const throws0 = (await phoneRush(phone)).rushSent.events.tap ?? 0;
       for (let dart = 0; dart < 3; dart++) {
         await phone.mouse.move(aim.x, aim.y);
         await phone.mouse.down();
@@ -119,7 +120,7 @@ for (const dev of PHONES) {
         await sleep(1300);
       }
       const ps2 = await phoneRush(phone);
-      expect((ps2.rushSent.events.flick ?? 0) - flicks0, 'three taps = three throws').toBeGreaterThanOrEqual(3);
+      expect((ps2.rushSent.events.tap ?? 0) - throws0, 'three taps = three throws').toBeGreaterThanOrEqual(3);
       await rushCall(page, 'skip'); // don't wait for the cap; skipping is part of the contract too
       await waitRush(page, `r.phase === 'lobby' && r.rid === ${rid2}`, 15_000);
 

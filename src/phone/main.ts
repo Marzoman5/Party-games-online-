@@ -15,6 +15,8 @@ import { tilt } from './tilt';
 import { motion, type RawMotion } from './motion/index';
 import type { RushEvent } from '../net/protocol';
 import { noteInjected, rush, touchMode } from './rush/runtime';
+import { transportKind } from '../net/link';
+import { rtcSignalStatus } from './rtcLink';
 
 const root = document.getElementById('phone-app') ?? document.body.appendChild(document.createElement('div'));
 const app = new App(root);
@@ -46,6 +48,8 @@ window.__phone = {
       hostConnected: state.hostConnected,
       rtt: state.rtt,
       error: state.error,
+      transport: transportKind(),
+      signals: rtcSignalStatus(),
       you: state.phone?.you ?? null,
       race: state.race,
       lastInput: { ...controls.lastInput },

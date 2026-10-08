@@ -3267,3 +3267,14 @@ html[data-game='smash'] .kp-race-chip {
   flex-wrap: wrap;
   justify-content: center;
 }
+
+/* Release version, bottom-left of the title screen (small, never in the way). */
+.kp-version {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  opacity: 0.4;
+  pointer-events: none;
+}

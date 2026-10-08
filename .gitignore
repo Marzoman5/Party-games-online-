@@ -18,3 +18,4 @@ dist-server/
 certs/
 test-results/
 playwright-report/
+dist-static/

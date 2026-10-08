@@ -81,6 +81,7 @@ export class TitleScreen implements ScreenView {
       h('div', 'kp-scrim kp-scrim-title'),
       h('div', 'kp-title-grid', left, h('div', 'kp-title-right', this.card)),
       solo,
+      h('div', { class: 'kp-version', 'data-tid': 'app-version' }, `v${__APP_VERSION__}`),
     );
   }
 
@@ -94,7 +95,14 @@ export class TitleScreen implements ScreenView {
 
     let msg = '';
     let bad = false;
-    if (!s.hostedOnce) {
+    if (s.transport === 'rtc') {
+      // Static site: this page is the server; phones only need a signalling service to find it.
+      if (!s.hostedOnce) msg = 'Creating a room…';
+      else if (s.joinService === 'down') {
+        bad = true;
+        msg = 'Can’t reach the joining service, so phones can’t join yet. Check this computer’s internet connection.';
+      } else if (s.joinService === 'connecting') msg = 'Connecting to the joining service…';
+    } else if (!s.hostedOnce) {
       if (s.netStatus === 'down') {
         bad = true;
         msg =

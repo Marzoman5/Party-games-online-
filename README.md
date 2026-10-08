@@ -1,11 +1,15 @@
 # 🎉 Party Hub — Kart Party + Smash Party + Party Rush
 
 > **Party quick start**
-> 1. Install [Node.js 18+](https://nodejs.org), then: `git checkout party-hub && npm install && npm start`
-> 2. The game opens in your browser — plug the laptop into the TV and press **F** (fullscreen).
-> 3. Everyone's phone on the **same Wi-Fi** as the laptop → scan the **QR code** on the TV.
-> 4. Pick a name + character, tap **READY**. The first player (👑 leader) picks **Kart Party**, **Smash Party** or **⚡ Party Rush** on their phone.
-> 5. Leader taps **START**. After each match the leader picks **Rematch / Change Settings / Switch Game / Lobby**.
+> 1. On whatever computer is connected to the TV, open **<https://marzoman5.github.io/Party-games-online-/>**
+>    (Chrome, Edge, Firefox or Safari) and press **F** for fullscreen. Nothing to install.
+> 2. Everyone's phone on the **same Wi-Fi** as that computer → scan the **QR code** on the TV
+>    (or open the link shown under it and type the 4-letter room code).
+> 3. Pick a name + character, tap **READY**. The first player (👑 leader) picks **Kart Party**, **Smash Party** or **⚡ Party Rush** on their phone.
+> 4. Leader taps **START**. After each match the leader picks **Rematch / Change Settings / Switch Game / Lobby**.
+>
+> No internet at the party, or phones can't connect to the website's game? Use the
+> [local / offline route](#local--offline-npm-start): `npm install && npm start` on a laptop.
 
 Party Hub is a couch-multiplayer party app: the game runs on a laptop or TV, and **up to 16 players use
 their phones as controllers** (a web page, nothing to install; Kart and Smash seat 4 at a time). Players
@@ -24,17 +28,52 @@ party. No Nintendo names, characters, sprites, sounds or stage likenesses are us
 ---
 
 ## Contents
+- [Hosting: the website or `npm start`](#hosting-the-website-or-npm-start)
 - [Party Hub flow](#party-hub-flow)
 - [⚡ Party Rush](#-party-rush) (quick start, the 10 games, host keys, settings, adding a minigame)
 - [Smash Party: controls](#smash-party-controls)
 - [Smash Party: mechanics](#smash-party-mechanics)
 - [Smash Party: fighters & movesets](#smash-party-fighters--movesets)
 - [Smash Party: stages & items](#smash-party-stages--items)
-- [How the party engine works (adding a game)](#how-the-party-engine-works)
-- [Setup](#setup) · [Firewall tips](#firewall-tips-phones-cant-connect) · [TV mode](#tv-mode) · [HTTPS / tilt](#https-mode-tilt-steering-on-iphone)
+- [How the party engine works](#how-the-party-engine-works) · [**How to add a game**](#how-to-add-a-game) · [**How to release**](#how-to-release)
+- [Local / offline: `npm start`](#local--offline-npm-start) · [Firewall tips](#firewall-tips-phones-cant-connect) · [TV mode](#tv-mode) · [HTTPS / tilt](#https-mode-tilt-steering-on-iphone)
 - [Kart Party controls](#controls) · [Kart game flow](#game-flow)
 - [Architecture & protocol](#architecture) · [Testing](#testing)
 - [Design decisions](#design-decisions) · [Known limitations](#known-limitations) · [Credits](#credits--licenses)
+
+## Hosting: the website or `npm start`
+
+The game always runs in the **host's browser** (the computer on the TV); phones are controllers. There are
+two ways to connect them, with the same games, screens and rules:
+
+| | **Website** (GitHub Pages) | **Local / offline** (`npm start`) |
+|---|---|---|
+| Start | open <https://marzoman5.github.io/Party-games-online-/> | `npm install && npm start` on a laptop |
+| Phones talk to the host | **directly** (WebRTC data channels) | through the Node server on the laptop (WebSocket) |
+| Needs | internet to *join* (a free signalling service); phones on the host's Wi-Fi | nothing but the Wi-Fi; no internet at all |
+| Motion sensors (Party Rush, tilt steering) | work out of the box (the site is HTTPS) | need `npm run start:https` + a certificate warning per phone |
+| Cost | free (static hosting; free public signalling + STUN) | free |
+
+**How the website version connects.** The host page *is* the server: it creates the room code and owns the
+player ids, reconnect tokens and message routing (the same code the Node server runs,
+`src/net/hub.ts`). A phone that opens the join link asks a public **signalling service** to pass a
+connection offer to the host page, then talks to it over a direct WebRTC connection; after that no
+third party is involved (on the same Wi-Fi, game input stays on the local network). Two independent free services are
+used at once so one outage doesn't stop people joining: the **PeerJS** cloud server, with public
+**Nostr relays** as the fallback (messages encrypted with the room code). Players already in the game keep
+playing if both go down; only new joins wait. Free public **STUN** servers help phones find a route; a
+**TURN** relay is optional (none by default). All of it is configurable in
+[`src/net/rtc/config.ts`](src/net/rtc/config.ts) or with repository variables at build time
+(`ICE_SERVERS`, `PEERJS`, `NOSTR`; see `.github/workflows/deploy.yml`).
+
+**If a phone can't connect** it says so instead of spinning: *"Can't connect to the game… Connect this phone
+to the same Wi-Fi as the computer showing the game"* (guest Wi-Fi with client isolation and some mobile
+networks block direct connections), *"You seem to be offline"* (no signalling service reachable), or
+*"Room ABCD not found"*. When the venue's network blocks direct connections, fall back to the
+[local route](#local--offline-npm-start) or a phone/laptop hotspot.
+
+**Links.** The phone page is `…/Party-games-online-/play/?room=ABCD`; typing
+`…/Party-games-online-/play/ABCD` also works (GitHub Pages' `404.html` forwards it, no server needed).
 
 ## Party Hub flow
 
@@ -67,9 +106,10 @@ can stall the party, nobody is punished for walking off to get a drink.
 
 ### Quick start
 
-1. Start the server in **secure mode** so phones may use their motion sensors: double-click
-   **Start Party Hub (Tilt Steering)** (it runs `npm run start:https`). Without HTTPS everything still works,
-   but phones fall back to touch controls (the hub card and the scoreboard say so).
+1. Open the [website](https://marzoman5.github.io/Party-games-online-/): it is HTTPS, so phones can use their
+   motion sensors right away. (Local route: start the server in **secure mode** — double-click
+   **Start Party Hub (Tilt Steering)**, which runs `npm run start:https`. Over plain HTTP everything still
+   works, but phones fall back to touch controls; the hub card and the scoreboard say so.)
 2. On the TV pick **⚡ Party Rush** (leader's phone, or click the card). It starts immediately — no lobby,
    no ready-up, no tutorial.
 3. Everyone scans the QR (always on the scoreboard, small in a corner during play) and taps **TAP TO PLAY**
@@ -243,7 +283,8 @@ src/engine/        game-agnostic party engine
   PartySession.ts  screens state machine, players/slots/tokens/reconnect, leader + succession,
                    ready/teams, tutorial runner, sandbox, pause + resume vote, game switching
   PhoneSync.ts     personalised PhoneState per phone (diffed) + ~10 Hz per-phone match status
-  net/HostNet.ts   host WebSocket, reconnect, decodes BOTH input packet kinds (kart tag 0, fighter tag 1)
+  net/HostNet.ts   host link to the relay, reconnect, decodes the input packets (kart 0, fighter 1, rush 2)
+  net/rtc/RoomServer.ts  website only: the host page as the room server (hub + WebRTC + signalling)
   GameModule.ts    THE game-module interface (TSDoc)
   display.ts       TV mode (--ui-scale, --safe, html.tv), fullscreen, cursor hiding
 src/party/         host UI shell: title (QR), lobby/hub with game cards, tutorial, race/pause overlays
@@ -251,8 +292,10 @@ src/games/registry.ts   the list of games
 src/games/kart/         KartModule (wraps the kart engine, setup, Grand Prix, results, tutorial art)
 src/games/smash/module/ SmashModule (setup sanitising, tutorial, sandbox, results, host setup/results UI)
 src/games/smash/        Smash engine: sim/ (60 Hz simulation + CPU AI), model/ (fighters), view/ + SmashGame.ts
-src/phone/         phone controller framework + layouts (kart controller, fighter controller)
-server/            Node relay: rooms, QR, tokens/reconnect (game-agnostic)
+src/phone/         phone controller framework + layouts (kart controller, fighter controller, rush)
+src/net/           protocol.ts (the wire contract), hub.ts (rooms/tokens/routing, shared by both transports),
+                   link.ts (the transport seam), rtc/ (WebRTC peer, signalling, config)
+server/            Node relay: serves the pages, runs src/net/hub.ts over WebSocket (game-agnostic)
 scripts/bots.ts    bot phones (kart driving + Smash bot brain) for tests and soak runs
 ```
 
@@ -266,14 +309,55 @@ A game is a `GameModule` (`src/engine/GameModule.ts`) that declares:
   message each phone gets), `tryIt` reactions, `look(characterId)` for portraits;
 - **results** come back through the session (rows + winner info) and drive the post-match menu.
 
-**Adding a third game:** write a module + engine, add it to `src/games/registry.ts`, add its id to
-`GameId`/`GAME_IDS` in `src/net/protocol.ts`, and add a phone layout (`src/phone/framework/layout.ts`:
-implement `ControllerLayout`, register it in `LAYOUT_FACTORIES` / `LAYOUT_FOR_GAME`). The server, lobby,
-QR/join, reconnect, pause/vote, TV mode and tutorial runner need no changes.
+Games never see the network: they get decoded inputs and send `HostToPhone` messages through the session,
+so they work unchanged on both transports. See [How to add a game](#how-to-add-a-game).
 
-## Setup
+## How to add a game
 
-Requirements: **Node.js 18 or newer** (20/22 recommended) and a modern browser on the host
+The game-module structure already makes this a self-contained job; nothing in networking, hosting, the
+lobby, QR/join, reconnect, pause/vote, TV mode or the tutorial runner needs to change.
+
+1. **Branch**: `git checkout main && git pull && git checkout -b feat/<game>` (see `CONTRIBUTING.md`).
+2. **Module**: create `src/games/<game>/` with a `GameModule` (`src/engine/GameModule.ts` documents every
+   hook; copy the shape of `src/games/kart/KartModule.ts` or `src/games/smash/module/SmashModule.ts`).
+   Load the heavy engine lazily in `load()` (dynamic `import()`), as Smash does, so the phone page and the
+   first paint stay small. For a Party-Rush-style drop-in game set `dropIn = true`.
+3. **Register** it in `src/games/registry.ts`, and add its id to `GameId` / `GAME_IDS` in
+   `src/net/protocol.ts`.
+4. **Phone controls**: reuse a layout (kart, fighter, rush) or add one in `src/phone/framework/layout.ts`
+   (implement `ControllerLayout`, register it in `LAYOUT_FACTORIES` / `LAYOUT_FOR_GAME`). Input that needs
+   to be fast goes in a compact array packet like `[1, …]` (fighter) or `[2, …]` (rush stream) — reuse one
+   if it fits. A **new** packet tag must also be added to the validator in `src/net/hub.ts`
+   (`relayInput`) and the decoder in `src/engine/net/HostNet.ts`; that's the only networking change ever
+   needed, and it covers both transports. Keep packets to absolute state + press counters (the website
+   sends them on an unreliable channel where a lost packet is simply superseded by the next one).
+5. **Tests**: a Playwright spec with bot phones (`scripts/bots.ts`, `tests/smashHelpers.ts` as a model)
+   in `tests/`, and a short real-phone check in `tests/rtc/rtc-games.spec.ts` proving that a tap on the
+   phone reaches your game over WebRTC.
+6. **Release** it as a minor version (`1.1.0`): add a line under *Unreleased* in `CHANGELOG.md`, open a
+   PR, then follow [How to release](#how-to-release).
+
+## How to release
+
+`main` is always releasable and every push to it redeploys the website. Work happens on short-lived
+`feat/…` / `fix/…` branches merged by pull request (CI runs typecheck, both builds and the end-to-end
+suites on each PR). To publish a version:
+
+1. Pick the number: **`1.1.0`** for new features or games, **`1.0.1`** for fixes (major only for breaking
+   changes such as a protocol version bump).
+2. In a PR: set `"version"` in `package.json` (`npm version 1.1.0 --no-git-tag-version`), move the
+   *Unreleased* notes in `CHANGELOG.md` under `## [1.1.0] - YYYY-MM-DD`, merge.
+3. Tag the merge commit and push the tag: `git tag v1.1.0 origin/main && git push origin v1.1.0`.
+   The *Release* workflow publishes a GitHub Release with that CHANGELOG section as its notes.
+4. The version shows small on the title screen (bottom left) and under the phone's room-code box, so you
+   can see at a glance which build a party is running.
+
+Details and the branch rules: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Local / offline: `npm start`
+
+The original way to host, and the one to use without internet or when the venue's network blocks direct
+phone ↔ computer connections for the website. Requirements: **Node.js 18 or newer** (20/22 recommended) and a modern browser on the host
 (Chrome / Edge / Firefox / Safari with WebGL 2). Phones: iOS Safari 15+ or Android Chrome.
 
 ```bash
@@ -420,10 +504,19 @@ New players can join between races (late joiners wait for the next race).
                        IP, rooms, tokens      └──
 ```
 
-- **Server** (`server/`, bundled to `dist-server/server.mjs`): Express serves the built pages
-  (`/` host, `/play` phone), `GET /api/info`, `GET /api/qr.svg?data=…` (QR rendered server-side,
-  offline), and a WebSocket relay at `/ws`. It owns only identity: 4-letter room codes, player ids
-  and reconnect tokens. It relays phone input to the host immediately (no batching, no compression).
+- **Server** (`server/`, bundled to `dist-server/server.mjs`; `npm start` route): Express serves the
+  built pages (`/` host, `/play` phone), `GET /api/info`, `GET /api/qr.svg?data=…`, and a WebSocket relay
+  at `/ws`. It owns only identity: 4-letter room codes, player ids and reconnect tokens
+  (`src/net/hub.ts`). It relays phone input to the host immediately (no batching, no compression).
+- **Website route** (static build, `npm run build:static`): there is no server. The host page runs the
+  same `src/net/hub.ts` itself (`src/engine/net/rtc/RoomServer.ts`), keeps the room in `sessionStorage` so a
+  reload keeps it, hands it to a newer tab over a `BroadcastChannel`, and accepts phones over WebRTC
+  (`src/phone/rtcLink.ts` on the phone, `src/net/rtc/` shared). Each phone gets two data channels: a
+  reliable one for control messages and an ordered one without retransmits for the 60 Hz input arrays.
+- **Transport seam** (`src/net/link.ts`): `HostNet` and the phone's `Net` run the same join / ping /
+  reconnect protocol over a `Link` (a WebSocket, or the WebRTC equivalent), so neither the session nor any
+  game knows which transport is in use. The build picks it (`VITE_TRANSPORT`); `?net=ws|rtc` overrides.
+- QR codes are generated in the browser (`qrcode` package), for both routes.
 - **Host** (`src/game`, `src/party`, plus the base game modules): the browser simulation is
   authoritative — physics at a 120 Hz fixed step, AI, items, race logic. `src/game/api.ts`
   (`IGameHost`) is the boundary between the engine and the party layer.
@@ -432,7 +525,8 @@ New players can join between races (late joiners wait for the next race).
 
 ### Protocol (`src/net/protocol.ts`)
 
-All frames are JSON text over one WebSocket per client.
+All frames are JSON text, over one WebSocket per client or the WebRTC data channels; the messages are
+identical on both transports.
 
 - **Input** (phone → host, ~60 Hz plus immediately on any button change), a compact array:
   `[0, seq, steer(-100..100), throttle(0..100), brake(0..100), buttons, itemPresses]` — buttons is
@@ -458,13 +552,28 @@ See `CONTRACT.md` for the full module contract and file ownership.
 
 ```bash
 npm run typecheck   # host + phone + server + tests
-npm run build       # production build (dist/ + dist-server/)
-npm test            # builds, starts the server, runs the Playwright suite (headless Chromium)
+npm run build       # production build for `npm start` (dist/ + dist-server/)
+npm run build:static            # the website (dist-static/, WebRTC, under /Party-games-online-/)
+npm run preview:static          # build + serve it locally like GitHub Pages (http://localhost:4173/Party-games-online-/)
+npm test            # both Playwright projects (headless Chromium):
+npx playwright test --project=ws    #   the `npm start` route (Node server, bot phones + real phone pages)
+npx playwright test --project=rtc   #   the website route (static build, real phone pages over WebRTC)
 npm run bots -- --url http://localhost:3000 --n 4   # 4 simulated phones play against a real host
 npm run bots -- --url http://localhost:3000 --n 4 --game smash   # ...the Smash Party loop
 npx tsx src/games/smash/sim/dev/selftest.ts         # Smash simulation self-test (knockback, all moves, rules)
 npx tsx src/games/smash/sim/ai/dev/aiSoak.ts        # CPU-vs-CPU soak (match length, recovery, level ladder)
 ```
+
+**Website / WebRTC coverage** (`tests/rtc/`, ~5 min): the static build served like GitHub Pages, real phone
+pages in separate browser contexts, and **local stand-ins for the signalling services**
+(`scripts/signal-standins.mjs`: a real PeerJS server and a minimal Nostr relay that checks signatures), so
+no test depends on a public service. Covered: room + in-browser QR + version + project-path links, the
+`/play/ABCD` shortcut, two phones joining and readying; Kart (phone steering turns the host kart, ITEM,
+results), Smash (sandbox attack, match jump) and Party Rush (one-tap join, mashing moves the runner) from real
+touches; phone drop → same seat; host reload → same room, players and seats, phones reconnect on their own;
+second tab takes over and the first takes it back; wrong code → "not found"; PeerJS down → joins via Nostr,
+Nostr down → joins via PeerJS; no signalling at all → phone "offline" screen and host warning; UDP blocked
+(guest-Wi-Fi-like) → phone "connect to the same Wi-Fi" screen.
 
 **Party Rush coverage** (`tests/rush-*.spec.ts`, ~20 min; `npm run test:rush`, `npm run test:motion`): real
 phone pages (iPhone + Android portrait) join with one tap, play touch-fallback rounds and get results, and a
@@ -621,10 +730,18 @@ Judgment calls made while building (the brief said "decide, document, keep going
   (players touch it constantly while racing, so it rarely matters).
 - **Tilt steering requires HTTPS** (`npm run start:https`) and clicking through a certificate
   warning on each phone.
-- Networking is local only (same Wi-Fi). Networks with client isolation (many guest/hotel Wi-Fi)
-  block phones from reaching the laptop — use a phone/laptop hotspot instead.
+- Phones and host must reach each other directly (same Wi-Fi). Networks with client isolation (many
+  guest/hotel Wi-Fi) block that on both routes — use the main network or a phone/laptop hotspot. On the
+  website, phones on mobile data *may* connect through STUN, but often can't without a TURN server.
 - Only one host screen per room; opening the game in a second tab takes over the room (the first
   tab shows "open in another tab").
+- **Website vs `npm start` differences**: on the website a room lives in the host tab, so if that tab is
+  *closed* (not reloaded) the room is gone (the Node server keeps it 30 minutes); a host reload or a tab
+  takeover makes phones reconnect for a few seconds (with the server they stay connected); joining needs
+  internet for the signalling service (playing doesn't); a wrong room code takes ~12 s to report
+  "not found" (the server answers at once).
+- The public signalling services (0.peerjs.com, Nostr relays) are free community services with no uptime
+  promise; that's why two are used. If both are down, use the local route.
 - Split-screen renders a shadow pass per view; on weak GPUs the scaler turns shadows off.
 - Tutorial sound effects on the host only play after someone has clicked/pressed a key on the
   host page once (browser autoplay rules).

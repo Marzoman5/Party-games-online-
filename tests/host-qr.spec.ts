@@ -8,10 +8,10 @@ import { LAPTOP, TV, collectErrors, openHost, partyState, settle, shot } from '.
 async function checkQr(page: Page, vp: { width: number; height: number }): Promise<void> {
   const qr = page.getByTestId('qr');
   await expect(qr).toBeVisible();
-  // The image is served by the relay (/api/qr.svg) and must actually load.
+  // The image is generated in the browser (an SVG data URL, no server needed) and must actually load.
   await expect.poll(() => qr.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0), { timeout: 30_000 }).toBe(true);
   const src = await qr.getAttribute('src');
-  expect(src).toContain('/api/qr.svg');
+  expect(src).toMatch(/^data:image\/svg\+xml/);
   const box = await qr.boundingBox();
   expect(box, 'QR bounding box').not.toBeNull();
   // Big enough to scan from the couch: at least a quarter of the screen height, fully on screen.
