@@ -29,10 +29,10 @@ test.describe('Party Hub: pick Smash Party, tutorial, sandbox, setup', () => {
       expect(bots[1].state?.you?.characterId).toBe(BOT_CHARS[1]);
       expect(bots[1].state?.takenCharacters).toContain(BOT_CHARS[0]);
 
-      // The game picker lists both games.
+      // The game picker lists all three games (PARTY RUSH added the third: Party Rush).
       const s0 = await hubState(page);
-      expect((s0.games ?? []).map((g) => g.id).sort()).toEqual(['kart', 'smash']);
-      expect((bots[0].state?.games ?? []).map((g) => g.id).sort()).toEqual(['kart', 'smash']);
+      expect((s0.games ?? []).map((g) => g.id).sort()).toEqual(['kart', 'rush', 'smash']);
+      expect((bots[0].state?.games ?? []).map((g) => g.id).sort()).toEqual(['kart', 'rush', 'smash']);
       await expect(page.getByTestId('game-card-kart')).toBeVisible();
       await expect(page.getByTestId('game-card-smash')).toBeVisible();
 

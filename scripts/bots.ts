@@ -1,6 +1,6 @@
 /**
- * Bot phones for Party Hub (Kart Party + Smash Party): fake controllers that speak the real
- * wire protocol.
+ * Bot phones for Party Hub (Kart Party + Smash Party + Party Rush): fake controllers that speak the
+ * real wire protocol.
  *
  * Library use (Node, e.g. Playwright tests):
  *   import { BotPhone } from '../scripts/bots';
@@ -21,6 +21,11 @@
  *                   practise in the sandbox and tap "I'm ready", leader sets up a stock match
  *                   (--stocks N, --stage ID, --teams, --cpus N), bots fight with a blind brain,
  *                   leader picks Rematch after each match.
+ *     --game rush   play Party Rush: the leader picks Rush (and START if needed), every bot does the
+ *                   one-tap join, then plays every minigame forever with the minigame bot brains
+ *                   (src/games/rush/bots.ts); up to 16 bots (--n 16). With --chaos bots also go
+ *                   away (hidden tab) and come back, and drop/reconnect their socket.
+ *     --skill X     Rush bot skill 0..1 (default 0.6)
  *
  * Smash Party (library):
  *   bot.game('smash'); bot.gsetup({ stageId: 'arena', stocks: 2 }); bot.team(1); bot.practiceDone();
@@ -29,14 +34,28 @@
  *   bot.press('attack');                        // +1 press counter, held bit, sent at once, released later
  *   bot.flickAttack('right');                   // smash attack
  *   bot.startSmashBrain(); bot.observe(view);   // AI that plays (feed it __smash.getState() at 5–10 Hz)
+ *
+ * Party Rush (library):
+ *   bot.rush                                    // last RushPhoneMsg ({t:'mg'}) from the host
+ *   bot.rushHere();                             // the join / come-back tap (mode v=0 touch + here)
+ *   bot.rushEvent('flick', 60);                 // a gesture event (rid, and c/ms when a cue is up)
+ *   bot.startRushBrain(0.6);                    // plays every minigame (BOTS[msg.g]): 20 Hz streams,
+ *                                               // events with phone-measured ms, `act` heartbeats
+ *   bot.rushAway();                             // tab hidden: sends 'away' and stops acting
+ *   bot.rushAway(false);                        // just stops acting (idle → host marks it away)
  */
 import { pathToFileURL } from 'node:url';
 import WebSocket from 'ws';
+import { BOTS } from '../src/games/rush/bots';
+import { seededRandom } from '../src/games/rush/draw';
+import type { Bot as RushBot } from '../src/games/rush/types';
 import {
+  MAX_PLAYERS,
   PROTOCOL_VERSION,
   WS_PATH,
   encodeFightInput,
   encodeInput,
+  encodeStream,
   type DecodedFightInput,
   type DecodedInput,
   type GameId,
@@ -44,8 +63,10 @@ import {
   type PhoneFx,
   type PhoneRaceStatus,
   type PhoneState,
+  type MgFromPhone,
   type PhoneToHost,
   type RaceSetup,
+  type RushPhoneMsg,
   type ScreenId,
   type ServerError,
   type SmashSetup,
@@ -163,6 +184,31 @@ export class BotPhone {
   /** Brain decisions taken (for tests / logs). */
   brainActions: Record<string, number> = {};
 
+  // Party Rush
+  /** PARTY RUSH: the latest RushPhoneMsg (`{t:'mg'}`) from the host. */
+  rush: RushPhoneMsg | null = null;
+  /** RushPhoneMsgs received so far. */
+  rushMsgs = 0;
+  /** What this bot sent on the minigame channel (like `__phone.getState().rushSent`). */
+  rushSent = { stream: 0, act: 0, here: 0, away: 0, mode: 0, next: 0, events: {} as Record<string, number> };
+  /** Rounds (rid) in which the Rush brain played (got to step a minigame brain). */
+  rushRoundsPlayed = new Set<number>();
+  /** Traffic seen by this socket (text frames, bytes) and the largest message received. */
+  bytesIn = 0;
+  bytesOut = 0;
+  maxMsgIn = 0;
+  msgsIn = 0;
+  private rushCueId = -1;
+  private rushCueAt = 0;
+  private rushSeq = 0;
+  private rushTimer: NodeJS.Timeout | null = null;
+  private rushBrainState: { game: string; rid: number; bot: RushBot | null; t0: number; last: number } | null = null;
+  private rushSkill = 0.6;
+  private rushRand: () => number = Math.random;
+  private rushQuiet = false;
+  private rushLastAct = 0;
+  private rushTouch = true;
+
   private constructor(ws: WebSocket) {
     this.ws = ws;
   }
@@ -178,7 +224,12 @@ export class BotPhone {
     const ws = new WebSocket(wsUrlFor(baseUrl), { perMessageDeflate: false, rejectUnauthorized: false });
     const bot = new BotPhone(ws);
     ws.on('message', (data, isBinary) => {
-      if (!isBinary) bot.onMessage(data.toString());
+      if (isBinary) return;
+      const raw = data.toString();
+      bot.bytesIn += raw.length;
+      bot.msgsIn++;
+      if (raw.length > bot.maxMsgIn) bot.maxMsgIn = raw.length;
+      bot.onMessage(raw);
     });
     ws.on('error', () => undefined); // surfaced via close / connect rejection
     ws.on('close', (c) => {
@@ -290,6 +341,17 @@ export class BotPhone {
         this.fx.push(msg as unknown as PhoneFx);
         if (this.fx.length > 200) this.fx.shift();
         break;
+      case 'mg': {
+        const r = msg as unknown as RushPhoneMsg;
+        this.rush = r;
+        this.rushMsgs++;
+        // Like the phone: a NEW cue id restarts the reaction timer at message arrival.
+        if (r.cue && r.cue.id !== this.rushCueId) {
+          this.rushCueId = r.cue.id;
+          this.rushCueAt = performance.now();
+        }
+        break;
+      }
     }
     this.notify();
   }
@@ -342,7 +404,10 @@ export class BotPhone {
 
   /** Send a raw phone->host message (object) or input packet. No-op if closed. */
   send(m: PhoneToHost | readonly unknown[]): void {
-    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(m));
+    if (this.ws.readyState !== WebSocket.OPEN) return;
+    const raw = JSON.stringify(m);
+    this.bytesOut += raw.length;
+    this.ws.send(raw);
   }
 
   profile(name: string, characterId: string): void {
@@ -833,9 +898,154 @@ export class BotPhone {
   }
 
 
+
+  // ------------------------------------------------------------- party rush
+
+  /** Wait for a RushPhoneMsg matching `pred`. */
+  waitForRush(pred: (m: RushPhoneMsg, b: BotPhone) => boolean, timeoutMs = 10000, what = 'rush msg'): Promise<this> {
+    return this.waitFor((b) => !!b.rush && pred(b.rush, b), timeoutMs, what);
+  }
+
+  /** Send one minigame-channel message (counts it in `rushSent`). */
+  sendMg(m: Omit<MgFromPhone, 't' | 'rid'> & { rid?: number }): void {
+    const msg = { t: 'mg', rid: m.rid ?? this.rush?.rid ?? 0, ...m } as MgFromPhone;
+    this.send(msg);
+    const k = msg.k;
+    if (k === 'act' || k === 'here' || k === 'away' || k === 'mode' || k === 'next') this.rushSent[k]++;
+    else this.rushSent.events[k] = (this.rushSent.events[k] ?? 0) + 1;
+  }
+
+  /**
+   * The ONE join tap (also "come back"): `mode` (v=0 touch fallback, v=1 sensors) + `here`.
+   * Also resumes acting after `rushAway()`.
+   */
+  rushHere(touch = true): void {
+    this.rushTouch = touch;
+    this.rushQuiet = false;
+    this.rushLastAct = 0;
+    this.sendMg({ k: 'mode', v: touch ? 0 : 1, rid: 0 });
+    this.sendMg({ k: 'here', rid: 0 });
+  }
+
+  /** Tab hidden (`send`), or just stop acting (idle: the host marks the bot away after a whole round). */
+  rushAway(send = true): void {
+    this.rushQuiet = true;
+    if (send) this.sendMg({ k: 'away', rid: 0 });
+  }
+
+  /** Is the bot currently silent (after rushAway)? */
+  get rushIdle(): boolean {
+    return this.rushQuiet;
+  }
+
+  /** Leader NEXT on the phone. */
+  rushNext(): void {
+    this.sendMg({ k: 'next', rid: 0 });
+  }
+
+  /**
+   * A gesture event like the phone sends it: current rid, and `c` + `ms` (ms since that cue id
+   * arrived) whenever a cue is up. `extra` overrides any field.
+   */
+  rushEvent(k: MgFromPhone['k'], v?: number, extra: Partial<Omit<MgFromPhone, 't' | 'k'>> = {}): void {
+    const m = this.rush;
+    const out: Omit<MgFromPhone, 't'> = { k, rid: m?.rid ?? 0 };
+    if (v !== undefined) out.v = v;
+    if (m?.cue && m.cue.id === this.rushCueId && this.rushCueAt > 0) {
+      out.c = m.cue.id;
+      out.ms = Math.max(0, Math.round(performance.now() - this.rushCueAt));
+    }
+    this.sendMg({ ...out, ...extra });
+  }
+
+  /** One tag-2 stream packet `[2, seq, rid, a, b, c]` for the current round. */
+  rushStream(a: number, b = 0, c = 0): void {
+    const rid = this.rush?.rid ?? 0;
+    this.send(encodeStream(this.rushSeq++ & 0xffffff, rid, a, b, c));
+    this.rushSent.stream++;
+  }
+
+  /** ms since the current cue id arrived (null = no cue up). */
+  get rushCueAgeMs(): number | null {
+    const c = this.rush?.cue;
+    return c && c.id === this.rushCueId && this.rushCueAt > 0 ? performance.now() - this.rushCueAt : null;
+  }
+
+  /**
+   * Play Party Rush: every 50 ms, while the host says `ph:'play'` and `me.st:'play'`, step the
+   * minigame's bot brain (`BOTS[msg.g]`, a fresh brain per round id) with the RushPhoneMsg exactly as a
+   * phone sees it, send its 20 Hz stream sample and its events (with c/ms like the phone), and an
+   * `act` heartbeat once a second while joined (play/next). Does NOT tap in by itself: call rushHere().
+   */
+  startRushBrain(skill = 0.6, seed = Math.floor(Math.random() * 1e9)): void {
+    this.stopRushBrain();
+    this.rushSkill = Math.max(0, Math.min(1, skill));
+    this.rushRand = seededRandom(seed);
+    this.rushBrainState = null;
+    this.rushTimer = setInterval(() => this.rushTick(), 50);
+  }
+
+  stopRushBrain(): void {
+    if (this.rushTimer) clearInterval(this.rushTimer);
+    this.rushTimer = null;
+    this.rushBrainState = null;
+  }
+
+  get rushBrainRunning(): boolean {
+    return this.rushTimer !== null;
+  }
+
+  private rushTick(): void {
+    const m = this.rush;
+    if (!m || !this.connected || this.rushQuiet) return;
+    const now = performance.now();
+    const st = m.me.st;
+    if ((st === 'play' || st === 'next') && now - this.rushLastAct >= 1000) {
+      this.rushLastAct = now;
+      this.sendMg({ k: 'act', rid: 0 });
+    }
+    if (m.ph !== 'play' || st !== 'play') return;
+    let b = this.rushBrainState;
+    if (!b || b.rid !== m.rid || b.game !== m.g) {
+      const factory = BOTS[m.g];
+      let bot: RushBot | null = null;
+      try {
+        bot = factory ? factory(this.rushRand, this.rushSkill) : null;
+      } catch {
+        bot = null;
+      }
+      b = this.rushBrainState = { game: m.g, rid: m.rid, bot, t0: now, last: now };
+    }
+    if (!b.bot) return;
+    const dt = Math.min(0.25, (now - b.last) / 1000);
+    b.last = now;
+    let out: ReturnType<RushBot['step']> = {};
+    try {
+      out = b.bot.step({ msg: m, dt, time: (now - b.t0) / 1000, cueAgeMs: this.rushCueAgeMs }) ?? {};
+    } catch {
+      b.bot = null;
+      return;
+    }
+    this.rushRoundsPlayed.add(m.rid);
+    if (m.s && out.stream) this.rushStream(out.stream[0], out.stream[1], out.stream[2]);
+    for (const e of out.events ?? []) {
+      if (!e) continue;
+      // The phone only sends the kinds the round listens for (+ taps from touch players).
+      if (!(m.ev as string[]).includes(e.k) && !(e.k === 'tap' && this.rushTouch)) continue;
+      const ev: Omit<MgFromPhone, 't'> = { ...e, rid: m.rid };
+      const age = this.rushCueAgeMs;
+      if (ev.c === undefined && m.cue && age !== null) {
+        ev.c = m.cue.id;
+        ev.ms = Math.round(age);
+      }
+      this.sendMg(ev);
+    }
+  }
+
   // --------------------------------------------------------------- lifecycle
 
   private stopTimers(): void {
+    this.stopRushBrain();
     this.stopDriving();
     this.stopFightLoop();
     if (this.brainTimer) clearInterval(this.brainTimer);
@@ -896,15 +1106,17 @@ interface CliOpts {
   stage?: string;
   teams: boolean;
   cpus: number;
+  /** Party Rush bot skill 0..1. */
+  skill: number;
 }
 
 function parseCli(argv: string[]): CliOpts {
-  const o: CliOpts = { url: 'http://localhost:3000', n: 4, race: false, passive: false, laps: 2, chaos: false, duration: 0, game: 'kart', stocks: 2, teams: false, cpus: 0 };
+  const o: CliOpts = { url: 'http://localhost:3000', n: 4, race: false, passive: false, laps: 2, chaos: false, duration: 0, game: 'kart', stocks: 2, teams: false, cpus: 0, skill: 0.6 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = (): string => argv[++i] ?? '';
     if (a === '--url') o.url = v();
-    else if (a === '--n') o.n = Math.max(1, Math.min(4, Number(v()) || 1));
+    else if (a === '--n') o.n = Math.max(1, Math.min(MAX_PLAYERS, Number(v()) || 1));
     else if (a === '--room') o.room = v().toUpperCase();
     else if (a === '--race') o.race = true;
     else if (a === '--passive') o.passive = true;
@@ -912,13 +1124,16 @@ function parseCli(argv: string[]): CliOpts {
     else if (a === '--track') o.track = v();
     else if (a === '--chaos') o.chaos = true;
     else if (a === '--duration') o.duration = Number(v()) || 0;
-    else if (a === '--game') o.game = v() === 'smash' ? 'smash' : 'kart';
+    else if (a === '--game') {
+      const g = v();
+      o.game = g === 'smash' || g === 'rush' ? g : 'kart';
+    } else if (a === '--skill') o.skill = Math.max(0, Math.min(1, Number(v()) || 0.6));
     else if (a === '--stocks') o.stocks = Math.max(1, Math.min(5, Number(v()) || 2));
     else if (a === '--stage') o.stage = v();
     else if (a === '--teams') o.teams = true;
     else if (a === '--cpus') o.cpus = Math.max(0, Math.min(4, Number(v()) || 0));
     else if (a === '-h' || a === '--help') {
-      console.log('npm run bots -- --url http://localhost:3000 --n 4 [--room ABCD] [--race] [--passive] [--laps N] [--track ID] [--chaos] [--duration S] [--game smash [--stocks N] [--stage ID] [--teams] [--cpus N]]');
+      console.log('npm run bots -- --url http://localhost:3000 --n 4 [--room ABCD] [--race] [--passive] [--laps N] [--track ID] [--chaos] [--duration S] [--game smash [--stocks N] [--stage ID] [--teams] [--cpus N]] [--game rush [--skill 0..1]]');
       process.exit(0);
     }
   }
@@ -1003,9 +1218,29 @@ async function runCli(): Promise<void> {
     }
   };
 
+  /** Party Rush: leader picks Rush (and START), everybody taps in once and plays forever. */
+  const rushTick = (b: BotPhone, idx: number): void => {
+    const st = b.state;
+    const id = b.playerId;
+    const leader = !o.passive && !!st?.you?.isLeader;
+    if (!b.rushBrainRunning) b.startRushBrain(o.skill, 1000 + idx * 7919);
+    if (leader && st) {
+      const where = st.screen;
+      if (st.game !== 'rush' && (where === 'lobby' || where === 'title' || where === 'setup' || where === 'results') && once(`${id}:game`, 2000)) b.game('rush');
+      else if (st.game !== 'rush' && (where === 'race' || where === 'paused' || where === 'loading') && once(`${id}:quit`, 4000)) b.quit();
+      else if (st.game === 'rush' && where !== 'race' && once(`${id}:start`, 3000)) b.start();
+    }
+    const r = b.rush;
+    if (st?.game === 'rush' && st.screen === 'race' && r && (r.me.st === 'new' || r.me.st === 'away') && !b.rushIdle && once(`${id}:here`, 2500)) b.rushHere(true);
+  };
+
   const tick = (): void => {
     if (o.game === 'smash') {
       bots.forEach((b, idx) => b.connected && smashTick(b, idx));
+      return;
+    }
+    if (o.game === 'rush') {
+      bots.forEach((b, idx) => b.connected && rushTick(b, idx));
       return;
     }
     bots.forEach((b, idx) => {
@@ -1040,6 +1275,8 @@ async function runCli(): Promise<void> {
   };
   // Make sure everyone has a profile ASAP even if the host hasn't sent state yet.
   bots.forEach((b, idx) => {
+    // Party Rush keeps the host's funny default names (and needs no racer / ready-up).
+    if (o.game === 'rush') return;
     b.profile(names.get(b) ?? 'Bot', ROSTER[(idx * 2) % ROSTER.length]);
     b.ready(true);
   });
@@ -1050,8 +1287,13 @@ async function runCli(): Promise<void> {
       .map((b) => {
         const r = b.race;
         const s = b.state?.screen ?? '-';
+        const rm = b.rush;
         const race =
-          o.game === 'smash'
+          o.game === 'rush'
+            ? rm
+              ? ` ${rm.ph}${rm.g ? `:${rm.g}` : ''} ${rm.me.st}${rm.me.st === 'away' && b.rushIdle ? '(chaos)' : ''} ${rm.me.pts}pts${rm.res ? ` #${rm.res.place}+${rm.res.pts}` : ''}`
+              : ''
+            : o.game === 'smash'
             ? b.fight && (s === 'race' || s === 'sandbox')
               ? ` ${b.fight.damage}% stocks=${b.fight.stocks} kos=${b.fight.kos}${b.fight.cpu ? ' CPU' : ''}${b.fight.dummyDamage !== undefined ? ` dummy=${b.fight.dummyDamage}%` : ''}`
               : ''
@@ -1065,6 +1307,22 @@ async function runCli(): Promise<void> {
   }, 2000);
 
   let chaos: NodeJS.Timeout | null = null;
+  let chaosAway: NodeJS.Timeout | null = null;
+  if (o.chaos && o.game === 'rush') {
+    // Rush chaos: a random bot "locks its phone" (away) for 5–25 s, then taps back in.
+    chaosAway = setInterval(() => {
+      const victims = bots.filter((b) => b.connected && !b.rushIdle && !b.state?.you?.isLeader);
+      const v = victims[Math.floor(Math.random() * victims.length)];
+      if (!v) return;
+      console.log(`[bots] chaos: ${names.get(v)} goes away`);
+      v.rushAway(Math.random() < 0.5);
+      setTimeout(() => {
+        if (!v.connected) return;
+        console.log(`[bots] chaos: ${names.get(v)} taps back in`);
+        v.rushHere(true);
+      }, 5000 + Math.random() * 20000);
+    }, 9000);
+  }
   if (o.chaos) {
     chaos = setInterval(() => {
       const victims = bots.filter((b) => b.connected && !b.state?.you?.isLeader);
@@ -1089,6 +1347,7 @@ async function runCli(): Promise<void> {
     clearInterval(flow);
     clearInterval(status);
     if (chaos) clearInterval(chaos);
+    if (chaosAway) clearInterval(chaosAway);
     await Promise.all(bots.map((b) => b.close()));
     process.exit(0);
   };

@@ -137,7 +137,10 @@ for (const dev of DEVICES) {
       await expect(page.locator('.kp-ack .kp-tryit-item')).toHaveCount(1, { timeout: 15_000 });
       await shot(page, `10-host-tutorial-tryit-from-${dev.tag}-laptop.jpg`);
 
-      expect((await partyState(page)).tutorial?.phase).toBe('steps');
+      // The 6 steps auto-advance on a wall-clock timer (6 × 3.8 s ≈ 23 s): on a loaded machine the screenshots
+      // + touch checks above can outlast them, so the tutorial may already wait for acks ('ack'). Both are fine:
+      // "Got it!" is accepted in either phase. It must not be over yet, though.
+      expect(['steps', 'ack']).toContain((await partyState(page)).tutorial?.phase);
       await phone.getByTestId('btn-gotit').tap();
       await shot(phone, p('03-tutorial-gotit'));
       // With a single player, their ack ends the tutorial ~1.2 s later (the host chip may already be gone),
