@@ -191,18 +191,20 @@ export const DONT_MOVE = {
 /** 7 · Tug of War (MG3). */
 export const TUG_OF_WAR = {
   /** Drum beat period (s) per heat — faster beat at higher heat (the timing window stays the same). */
-  beatSec: [0.62, 0.55, 0.49],
+  beatSec: [0.9, 0.8, 0.7],
   /** First beat this long after GO (s). */
-  firstBeatSec: 0.7,
+  firstBeatSec: 1.2,
   /** On-beat window (± ms), judged from the phone-measured ms since the beat cue. */
-  windowMs: 220,
+  windowMs: 250,
   /** Pull strengths: on the beat / off the beat / mashing (more than `mashAfter` pulls in one beat). */
-  onBeat: 1.0,
-  offBeat: 0.25,
-  mash: 0.1,
-  mashAfter: 3,
+  /** Pull strengths. EVERY flick pulls: off the beat = offBeat (at most `offPerBeat` of those count per
+   *  beat), on the beat = a PERFECT pull that tops the beat up to onBeat. So steady rhythm (1.5 per beat)
+   *  beats wild mashing (1.0 per beat), but nobody ever pulls for nothing. */
+  onBeat: 1.5,
+  offBeat: 0.5,
+  offPerBeat: 2,
   /** Rope travel (fraction of the way to a win line) per unit of team-average pull strength. */
-  pullGain: [0.1, 0.11, 0.12],
+  pullGain: [0.085, 0.09, 0.095],
   /** The round keeps rendering this long after the rope crosses, then ends (s). */
   endDelaySec: 1.6,
 } as const;
@@ -284,10 +286,10 @@ export const DARTS = {
   /** Per-player resting offset (board radii) so 16 crosshairs don't stack at rest. */
   spread: 0.16,
   /** Crosshair sway amplitude (board radii) and speed (Hz) per heat. */
-  sway: 0.035,
+  sway: 0.02,
   swayHz: [0.45, 0.5, 0.55],
   /** The dart lands where the crosshair was this long before the flick (cancels the flick's own jerk). */
-  lookBack: 0.15,
+  lookBack: 0.07,
   /** Random landing scatter (board radii). */
   scatter: 0.015,
   /** Minimum seconds between two darts of one player, per heat. */

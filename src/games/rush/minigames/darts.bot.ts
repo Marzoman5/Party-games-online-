@@ -55,7 +55,7 @@ export const dartsBot: BotFactory = (rand, skill) => {
       ay = Math.max(-1000, Math.min(1000, ay));
       const out: ReturnType<ReturnType<BotFactory>['step']> = { stream: [Math.round(ax), Math.round(ay), 0] };
       if (flick) {
-        out.events = [{ k: 'flick', v: 30 + Math.round(rand() * 50), x: 0, y: 100 }];
+        out.events = [{ k: 'tap', v: 0, x: 0, y: 0 }];
         thrown++;
         ax = ay = 0;
         aimFor = 0;

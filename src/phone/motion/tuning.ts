@@ -134,9 +134,12 @@ export const MT = {
 
   // ------------------------------------------------------------------ aim
   /** ±1000 = ±AIM_FULL_DEG of wrist rotation from the re-centre point. */
-  AIM_FULL_DEG: 13,
+  /** false = aim from gravity (tilt relative to the re-centre point): steady, no drift, works the same on
+   *  every phone. true = integrate the gyro (wand-style yaw/pitch); drifts and felt confusing on real phones. */
+  AIM_USE_GYRO: false as boolean,
+  AIM_FULL_DEG: 16,
   /** The integrator clamps a bit past full scale so coming back responds immediately. */
-  AIM_CLAMP_DEG: 15,
+  AIM_CLAMP_DEG: 18,
   /** Slow drift correction: aim decays toward the centre with this tc (s). */
   AIM_DECAY_TC: 30,
 } as const;

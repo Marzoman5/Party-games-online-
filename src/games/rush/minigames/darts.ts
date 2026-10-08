@@ -69,13 +69,13 @@ export const darts: MinigameDef = {
   meta: {
     id: 'darts',
     name: 'Darts',
-    instr: 'Turn your wrist to aim. Flick to throw!',
-    word: 'AIM!',
+    instr: 'Tilt your phone to aim. TAP the screen to throw!',
+    word: 'TAP = THROW',
     demo: 'aim',
     minPlayers: 1,
     duration: [25, 22, 20],
     stream: 'aim',
-    events: ['flick'],
+    events: ['tap'],
     touch: 'Drag, tap to throw!',
     energetic: false,
     color: '#ff5fb8',
@@ -120,8 +120,6 @@ export const darts: MinigameDef = {
       t.darts.push({ x, y, pts, at: now, rot: -0.75 + (ctx.rand() - 0.5) * 0.5, thudDone: false });
       t.total += pts;
       t.lastThrow = now;
-      // the phone re-centres aim on every dart: snap ours too
-      t.tx = t.ty = t.sx = t.sy = 0;
       t.hist.length = 0;
       ctx.sfx('whoosh', { pan: (x * BR) / (STAGE_W / 2), vol: 0.5 });
       const last = t.darts.length >= T.darts;

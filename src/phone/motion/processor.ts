@@ -754,7 +754,7 @@ export class MotionProcessor {
 
   private aimOut(): [number, number, number] {
     let x: number, y: number;
-    if (this.hasGyro) {
+    if (this.hasGyro && MT.AIM_USE_GYRO) {
       x = this.aimYaw;
       y = this.aimPitch;
     } else {

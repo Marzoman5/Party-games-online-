@@ -241,9 +241,18 @@ export class RushView implements ControllerLayout {
     // Any touch on the view counts as activity (touch players) and keeps audio alive (iOS suspends it).
     this.el.addEventListener(
       'pointerdown',
-      () => {
-        this.anyTouchAt = performance.now();
+      (e) => {
+        const now = performance.now();
+        this.anyTouchAt = now;
         unlockAudio();
+        // Motion players: rounds that listen for `tap` (Darts: aim with the phone, tap to throw).
+        const m = state.rush;
+        const el = e.target as Element | null;
+        const onUi = !!el && !!el.closest && !!(el.closest('.rz-gear') || el.closest('.rz-menu') || el.closest('.rz-tap'));
+        if (m && rush.tapped && !touchMode() && !onUi && m.ph === 'play' && m.me.st === 'play' && m.ev.includes('tap')) {
+          sfx('tap');
+          this.sendEvent('tap', 0, 0, 0, now);
+        }
       },
       { capture: true },
     );

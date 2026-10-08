@@ -97,10 +97,10 @@ their next tap — score kept. Alone? Two or three 🤖 bots join so every game 
 | 🌀 | **Tilt Maze** — roll your marble through a shared maze to the exit | tilt | drag the pad |
 | 💣 | **Hot Potato** — the bomb is ON your phone: flick it to someone else (3+ players) | small flick | tap |
 | 🧊 | **Don't Move!** — freeze while the TV tries to make you laugh | hold still | hold your thumb still |
-| 🪢 | **Tug of War** — random teams, pull on the drum beat (2+ players) | flick on the beat | tap on the beat |
+| 🪢 | **Tug of War** — random teams, pull on the drum beat (2+ players) | flick to pull (on the beat = power pull) | tap |
 | 📱 | **Copy the Pose** — match the phone pose on screen, fastest wins | 6 gravity poses | swipe / tap / double-tap |
 | 🎣 | **Fishing** — flick to cast, buzz? YANK!, shake to reel | flick, shake | tap, mash |
-| 🎯 | **Darts** — aim with your wrist, flick to throw 3 darts | aim + flick | drag, tap to throw |
+| 🎯 | **Darts** — aim with your wrist, flick to throw 3 darts | tilt to aim, tap the screen to throw | drag, tap to throw |
 
 Two games (Shake Race, Tug of War) show a "Hold your phone tight!" card first. All gestures are small wrist
 motions — detection thresholds are low so nobody learns to swing hard.

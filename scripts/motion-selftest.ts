@@ -10,6 +10,7 @@
 import type { RushEvent, RushStream } from '../src/net/protocol';
 import type { MotionEvent } from '../src/phone/motion/index';
 import { MotionProcessor, Normalizer, type V3 } from '../src/phone/motion/processor';
+import { MT } from '../src/phone/motion/tuning';
 import {
   Path, R_FLAT, R_HOLSTER, R_UPRIGHT, WX, WY, WZ, burst, generate, pulseRot, toDevice, turn,
   type GenOpts, type M3, type TraceSample,
@@ -342,7 +343,7 @@ const AIM_GRIPS: { name: string; R: M3 }[] = [
   { name: 'upright', R: turn(R_UPRIGHT, WX, -10) },
   { name: 'flat', R: turn(R_FLAT, WX, 20) },
 ];
-for (const v of ALL) {
+for (const v of MT.AIM_USE_GYRO ? ALL : []) {
   for (const g of AIM_GRIPS) {
     const path = new Path(g.R).hold(1).rot(WZ, -10, 0.3).hold(0.6).hold(0.2).rot(WX, 10, 0.3).hold(0.6);
     let x1 = 0, y1 = 0, xc = 99, x2 = 0, y2 = 0;
@@ -360,15 +361,14 @@ for (const v of ALL) {
   }
 }
 
-// no gyro: aim falls back to tilt relative to the re-centre point
-{
-  const v = V_NOGYRO;
+// gravity aim (the default, and the only way without a gyro): tilt relative to the re-centre point
+for (const v of MT.AIM_USE_GYRO ? [V_NOGYRO] : [...ALL, V_NOGYRO]) {
   const path = new Path(turn(R_FLAT, WX, 20)).hold(1).rot(WY, 10, 0.3).hold(0.6);
   let x1 = 0;
   run(gen(path, path.duration, v), v, 'aim', [], (p, sec) => {
     if (sec > 1.75) x1 = p.sample()[0];
   });
-  check('aim (no gyro): 10° right tilt', v.name, Math.abs(x1 - 769) < 90, x1, 'x≈+769');
+  check('aim by tilt: 10° right tilt', v.name, Math.abs(x1 - 625) < 90, x1, 'x≈+625');
 }
 
 // rad/s gyro (old Android): handled after some natural handling
@@ -381,7 +381,7 @@ for (const v of ALL) {
     if (sec > handle.duration - 0.1) x1 = p.sample()[0];
   }, [handle.duration - 1.5]);
   check('gyro units self-check (rad/s → deg/s)', v.name, Math.abs(r.p.gyroK - 57.2958) < 0.01, r.p.gyroK.toFixed(2), '57.30');
-  check('aim with rad/s gyro: 10° yaw', v.name, Math.abs(x1 - 769) < 70, x1, 'x≈+769');
+  if (MT.AIM_USE_GYRO) check('aim with rad/s gyro: 10° yaw', v.name, Math.abs(x1 - 625) < 70, x1, 'x≈+625');
   const v2: Variant = { name: 'android-deg/s', gen: {}, via: 'direct' };
   const r2 = run(gen(handle, handle.duration, v2), v2, 'aim', []);
   check('gyro units self-check (deg/s kept)', v2.name, r2.p.gyroK === 1 && r2.p.gyroChecked, `${r2.p.gyroK} checked=${r2.p.gyroChecked}`, '1, checked');

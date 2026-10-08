@@ -279,7 +279,7 @@ export class TouchPad {
   private flick(t: number): void {
     if (t - this.lastFlick < FLICK_REFRACTORY_MS) return;
     this.lastFlick = t;
-    this.emit({ k: 'flick', v: 60, x: 0, y: 100, t });
+    this.emit({ k: this.ev.includes('flick') ? 'flick' : 'tap', v: 60, x: 0, y: 100, t });
   }
 
   private fireTap(t: number): void {

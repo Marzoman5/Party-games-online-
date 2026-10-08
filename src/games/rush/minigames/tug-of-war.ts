@@ -34,6 +34,9 @@ interface TP {
   beatSlot: number;
   slotCount: number;
   slotOn: boolean;
+  /** Strength already credited in this beat slot. */
+  slotSum: number;
+  perfect: number;
   lastPullT: number;
   lastStrength: number;
 }
@@ -42,7 +45,7 @@ export const tugOfWar: MinigameDef = {
   meta: {
     id: 'tug-of-war',
     name: 'Tug of War',
-    instr: 'Flick your phone on every drum beat!',
+    instr: 'Flick to PULL! On the drum beat = POWER pull',
     word: 'PULL!',
     demo: 'yank',
     minPlayers: 2,
@@ -124,22 +127,28 @@ export const tugOfWar: MinigameDef = {
         tp.beatSlot = j.slot;
         tp.slotCount = 0;
         tp.slotOn = false;
+        tp.slotSum = 0;
       }
       tp.slotCount++;
       let s: number;
-      if (tp.slotCount > T.mashAfter) s = T.mash;
-      else if (j.on && !tp.slotOn) {
-        s = T.onBeat;
+      let perfect = false;
+      if (j.on && !tp.slotOn) {
+        // PERFECT: tops this beat up to the full on-beat strength
+        s = Math.max(0, T.onBeat - tp.slotSum);
         tp.slotOn = true;
         tp.onBeat++;
-      } else s = T.offBeat;
+        tp.perfect++;
+        perfect = true;
+      } else if (!tp.slotOn && tp.slotCount <= T.offPerBeat) s = T.offBeat;
+      else s = 0;
+      tp.slotSum += s;
       tp.pulls++;
       tp.lastPullT = now;
-      tp.lastStrength = s;
+      tp.lastStrength = perfect ? T.onBeat : s;
       const n = Math.max(1, presentCount(tp.team));
       pos += (tp.team === 1 ? 1 : -1) * (s / n) * gain;
       pos = clamp(pos, -1, 1);
-      if (s >= T.onBeat && now - lastPullFx > 0.05) {
+      if (perfect && now - lastPullFx > 0.05) {
         lastPullFx = now;
         ctx.sfx('whoosh', { vol: 0.35, pan: tp.team === 0 ? -0.5 : 0.5 });
       }
@@ -290,7 +299,7 @@ export const tugOfWar: MinigameDef = {
         const first: 0 | 1 = c.rand() < 0.5 ? 0 : 1;
         order.forEach((p, i) => {
           const team = (i % 2 === 0 ? first : 1 - first) as 0 | 1;
-          const tp: TP = { p, team, slot: teams[team].length, pulls: 0, onBeat: 0, beatSlot: -999, slotCount: 0, slotOn: false, lastPullT: -10, lastStrength: 0 };
+          const tp: TP = { p, team, slot: teams[team].length, pulls: 0, onBeat: 0, beatSlot: -999, slotCount: 0, slotOn: false, slotSum: 0, perfect: 0, lastPullT: -10, lastStrength: 0 };
           teams[team].push(tp);
           tps.push(tp);
           byId.set(p.id, tp);
@@ -500,8 +509,8 @@ export const tugOfWar: MinigameDef = {
             const a = 1 - age / 0.5;
             const px = x + dir * (tpos.r + 22 + age * 30);
             const py = y - tpos.r * 0.5 - age * 40;
-            if (tp.lastStrength >= T.onBeat) drawText(g, '★', px, py, 44, PAL.gold, { alpha: a, outline: 5 });
-            else drawText(g, '+', px, py, 32, '#fff', { alpha: a * 0.7, outline: 4 });
+            if (tp.lastStrength >= T.onBeat) drawText(g, 'POWER! ★', px, py, 40, PAL.gold, { alpha: a, outline: 6 });
+            else if (tp.lastStrength > 0) drawText(g, 'pull', px, py, 28, '#fff', { alpha: a * 0.8, outline: 4 });
           }
         }
 
@@ -537,7 +546,7 @@ export const tugOfWar: MinigameDef = {
             }
           }
           drawText(g, winner !== null || v.phase === 'results' ? '🏁' : 'PULL!', CX, ly, glow > 0.4 ? 40 : 34, glow > 0.4 ? '#2a1400' : '#fff', { outline: glow > 0.4 ? 0 : 5 });
-          if (!started || v.phase === 'count') drawText(g, 'Flick when the drum hits!', CX, ly - 82, 40, '#fff', { outline: 6 });
+          if (winner === null && v.phase !== 'results') drawText(g, 'Every flick pulls — flick as the dots hit the middle for a POWER pull!', CX, ly - 82, 38, '#fff', { outline: 6 });
         }
       },
       done() {
@@ -546,7 +555,7 @@ export const tugOfWar: MinigameDef = {
       results(): MinigameResult {
         const w: 0 | 1 | -1 = winner !== null ? winner : pos < 0 ? 0 : pos > 0 ? 1 : -1;
         const present = tps.filter((tp) => ctx.isPresent(tp.p.id));
-        const stat = (tp: TP): string => `${tp.pulls} pulls · ${tp.onBeat} on beat`;
+        const stat = (tp: TP): string => `${tp.pulls} pulls · ${tp.perfect} power`;
         const sorted = [...present].sort((a, b) => {
           const pa = w === -1 || a.team === w ? 1 : 2;
           const pb = w === -1 || b.team === w ? 1 : 2;
