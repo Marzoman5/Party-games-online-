@@ -9,7 +9,9 @@
  */
 import { chromium, expect, type Browser, type CDPSession, type Page } from '@playwright/test';
 
-export const BASE = '/Party-games-online-/';
+/** Set by `--project=live`: test the deployed site with the real public signalling services. */
+export const LIVE = !!process.env.KP_LIVE_URL;
+export const BASE = LIVE ? new URL(process.env.KP_LIVE_URL!).pathname.replace(/\/?$/, '/') : '/Party-games-online-/';
 export const SIGNAL_PORT = Number(process.env.KP_SIGNAL_PORT ?? 9199);
 export const PEERJS_URL = `ws://127.0.0.1:${SIGNAL_PORT}/peerjs?key=peerjs`;
 export const NOSTR_URL = `ws://127.0.0.1:${SIGNAL_PORT + 1}`;
@@ -27,6 +29,7 @@ export interface Signals {
 }
 
 export function sigQuery(s: Signals = {}): string {
+  if (LIVE) return ''; // the site's own (public) services
   const v = (on: boolean | '' | undefined, url: string): string => (on === '' ? '' : on === false ? DEAD_URL : url);
   return `peerjs=${encodeURIComponent(v(s.peerjs ?? true, PEERJS_URL))}&nostr=${encodeURIComponent(v(s.nostr ?? true, NOSTR_URL))}`;
 }
@@ -128,7 +131,8 @@ export async function waitPhone(phone: Page, pred: string, timeout = 30_000): Pr
 }
 
 export async function newPhonePage(browser: Browser, viewport: { width: number; height: number } = PHONE_PORTRAIT): Promise<Page> {
-  const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+  const proxy = LIVE && process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY } : undefined;
+  const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true, deviceScaleFactor: 2, proxy });
   return ctx.newPage();
 }
 

@@ -14,6 +14,7 @@
     "preview:static": "node scripts/build-static.mjs && node scripts/serve-static.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "playwright test",
+    "test:live": "playwright test --project=live",
     "bots": "tsx scripts/bots.ts",
     "test:motion": "tsx scripts/motion-selftest.ts",
     "test:rush": "tsx scripts/rush-selftest.ts"

@@ -12,7 +12,7 @@ test('static host: room, QR, version, project-path join link; 2 phones join over
   const hostErrs = collectErrors(page, 'host');
   const st = await openRtcHost(page, { stub: true });
   expect(st.transport).toBe('rtc');
-  expect(st.joinUrl).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+${BASE}play/\\?room=${st.room}&`));
+  expect(st.joinUrl).toMatch(new RegExp(`^https?://[^/]+${BASE}play/\\?room=${st.room}(&|$)`));
 
   const qr = page.getByTestId('qr');
   await expect(qr).toBeVisible();
