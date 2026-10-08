@@ -92,7 +92,7 @@ their next tap — score kept. Alone? Two or three 🤖 bots join so every game 
 | | Game | Gesture | No motion sensors (👆 touch) |
 |---|---|---|---|
 | 🏃 | **Shake Race** — shake to run (or pump a balloon, or shake a soda bottle) | shake | mash the button |
-| 🤠 | **Quick Draw** — phone down… raise on DRAW! (best of 3, beware fake-outs) | point down, raise | tap on DRAW |
+| 🤠 | **Quick Draw** — hold still… flick your phone on DRAW! (best of 3, beware fake-outs) | hold still, quick flick (any grip) | tap on DRAW |
 | 🍽️ | **Balance** — keep the ball on your plate while the wobble grows | tilt | drag the pad |
 | 🌀 | **Tilt Maze** — roll your marble through a shared maze to the exit | tilt | drag the pad |
 | 💣 | **Hot Potato** — the bomb is ON your phone: flick it to someone else (3+ players) | small flick | tap |

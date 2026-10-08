@@ -45,7 +45,7 @@ export const MT = {
   // ------------------------------------------------------------------ shake
   /** Intensity = |lin| + |gyro| * SHAKE_GYRO_W − SHAKE_FLOOR (m/s²-equivalent). */
   SHAKE_GYRO_W: 1 / 40,
-  SHAKE_FLOOR: 0.3,
+  SHAKE_FLOOR: 0.5,
   /** Pre-smoothing of the rectified intensity (removes the 2x-shake-frequency ripple). */
   SHAKE_PRE_TC: 0.08,
   /** Envelope attack / release. */

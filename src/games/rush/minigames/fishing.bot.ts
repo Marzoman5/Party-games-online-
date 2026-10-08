@@ -25,7 +25,7 @@ export const fishingBot: BotFactory = (rand, skill) => {
       if (st === 3) {
         burst = Math.max(0, burst - dt);
         if (burst === 0 && rand() < dt * 0.8) burst = 0.4 + rand() * 0.6;
-        const e = 250 + sk * 550 + (burst > 0 ? 200 : 0) + (rand() - 0.5) * 200;
+        const e = 380 + sk * 470 + (burst > 0 ? 200 : 0) + (rand() - 0.5) * 200;
         out.stream = [Math.round(Math.max(0, Math.min(1000, e))), 0, 0];
       } else out.stream = [Math.round(rand() * 60), 0, 0];
       const flick = (ms?: number, c?: number): void => {

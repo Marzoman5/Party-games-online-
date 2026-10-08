@@ -50,7 +50,7 @@ export const tiltMaze: MinigameDef = {
   meta: {
     id: 'tilt-maze',
     name: 'Tilt Maze',
-    instr: 'Tilt to roll to the exit!',
+    instr: 'Tilt your phone to roll to the exit!',
     word: 'TILT!',
     demo: 'tilt',
     minPlayers: 1,

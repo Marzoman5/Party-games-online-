@@ -52,7 +52,7 @@ export const balance: MinigameDef = {
   meta: {
     id: 'balance',
     name: 'Balance',
-    instr: 'Keep the ball on the plate!',
+    instr: 'Tilt your phone to keep the ball on!',
     word: 'BALANCE!',
     demo: 'tilt',
     minPlayers: 1,

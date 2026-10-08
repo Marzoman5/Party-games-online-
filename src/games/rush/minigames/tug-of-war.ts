@@ -42,7 +42,7 @@ export const tugOfWar: MinigameDef = {
   meta: {
     id: 'tug-of-war',
     name: 'Tug of War',
-    instr: 'PULL on the beat!',
+    instr: 'Flick your phone on every drum beat!',
     word: 'PULL!',
     demo: 'yank',
     minPlayers: 2,

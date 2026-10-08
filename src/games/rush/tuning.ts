@@ -248,9 +248,13 @@ export const FISHING = {
   reelPerKgSec: 0.3,
   reelHeatMul: [1, 0.88, 0.76],
   /** Shake energy (0..1000) that counts as "full speed" reeling. */
-  fullEnergy: 600,
+  fullEnergy: 650,
+  /** Shake energy below this is just a hand holding a phone: it reels nothing (only the creep). */
+  reelDeadEnergy: 250,
+  /** Right after the hook the yank itself still rings in the shake energy: ignore it this long (s). */
+  reelGraceSec: 0.6,
   /** Reel still creeps at this fraction of full speed with no shaking (never stuck). */
-  reelCreep: 0.08,
+  reelCreep: 0.04,
   /** Fish on display after landing (s). */
   landShowSec: 1.3,
   /** Idle this long → the line casts itself (s). */

@@ -42,7 +42,7 @@ export const copyPose: MinigameDef = {
   meta: {
     id: 'copy-pose',
     name: 'Copy the Pose',
-    instr: 'Match the phone on screen!',
+    instr: 'Turn your phone to match the picture!',
     word: 'COPY!',
     demo: 'pose',
     minPlayers: 1,

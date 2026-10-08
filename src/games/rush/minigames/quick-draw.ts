@@ -58,9 +58,9 @@ export const quickDraw: MinigameDef = {
   meta: {
     id: 'quick-draw',
     name: 'Quick Draw',
-    instr: 'Phone down… raise on DRAW!',
+    instr: 'Hold still… FLICK your phone on DRAW!',
     word: 'WAIT…',
-    demo: 'raise',
+    demo: 'flick',
     minPlayers: 1,
     duration: [25, 22, 20],
     stream: 'pitch',
@@ -93,7 +93,8 @@ export const quickDraw: MinigameDef = {
     let final: Map<Cowboy, { place: number; avg: number; allOut: boolean }> | null = null;
 
     const present = (c: Cowboy): boolean => ctx.isPresent(c.p.id);
-    const holstered = (c: Cowboy): boolean => c.p.touch || c.pitch === null || c.pitch <= T.downPitch;
+    // Any grip is fine now (a draw = a quick snap of the phone), so nobody is nagged to point down.
+    const holstered = (_c: Cowboy): boolean => true;
 
     function setWord(c: Cowboy, w: string): void {
       if (c.word === w) return;
@@ -461,7 +462,7 @@ export const quickDraw: MinigameDef = {
         const now = ctx.time;
         // phone word: nag motion players whose phone isn't pointing down before DRAW
         if (phase === 'holster' || phase === 'wait') {
-          for (const c of boys) if (present(c) && !c.cur) setWord(c, holstered(c) ? '' : 'POINT DOWN');
+          for (const c of boys) if (present(c) && !c.cur) setWord(c, holstered(c) ? 'STEADY…' : 'POINT DOWN');
         }
         if (phase === 'wait') {
           for (const f of fakes) {

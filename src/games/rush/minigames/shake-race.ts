@@ -53,7 +53,7 @@ export const shakeRace: MinigameDef = {
   meta: {
     id: 'shake-race',
     name: 'Shake Race',
-    instr: 'Shake to run!',
+    instr: 'Shake your phone to run!',
     word: 'SHAKE!',
     demo: 'shake',
     minPlayers: 1,

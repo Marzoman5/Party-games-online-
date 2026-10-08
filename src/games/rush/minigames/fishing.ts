@@ -121,7 +121,7 @@ export const fishing: MinigameDef = {
   meta: {
     id: 'fishing',
     name: 'Fishing',
-    instr: 'Flick to cast. Buzz? YANK!',
+    instr: 'Flick to cast. See YANK? Flick! Then shake.',
     word: 'CAST!',
     demo: 'cast',
     minPlayers: 1,
@@ -440,7 +440,8 @@ export const fishing: MinigameDef = {
             case 'reel': {
               const kg = fp.fish ? fp.fish.kg : 0.5;
               const secs = (T.reelBaseSec + T.reelPerKgSec * kg) * T.reelHeatMul[heatIdx];
-              const rate = Math.max(T.reelCreep, clamp(fp.energy / T.fullEnergy, 0, 1.25));
+              const shaking = now - fp.stT < T.reelGraceSec ? 0 : clamp((fp.energy - T.reelDeadEnergy) / (T.fullEnergy - T.reelDeadEnergy), 0, 1.25);
+              const rate = Math.max(T.reelCreep, shaking);
               const before = fp.reel;
               fp.reel = Math.min(1, fp.reel + (rate * dt) / secs);
               if (Math.floor(before * 5) !== Math.floor(fp.reel * 5)) {

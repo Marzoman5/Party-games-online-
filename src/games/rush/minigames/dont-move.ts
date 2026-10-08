@@ -54,7 +54,7 @@ export const dontMove: MinigameDef = {
   meta: {
     id: 'dont-move',
     name: "Don't Move!",
-    instr: "Freeze! Don't move a muscle!",
+    instr: "Phone in your hand — freeze! Don't move!",
     word: 'FREEZE!',
     demo: 'still',
     minPlayers: 1,

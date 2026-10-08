@@ -69,7 +69,7 @@ export const darts: MinigameDef = {
   meta: {
     id: 'darts',
     name: 'Darts',
-    instr: 'Aim… flick to throw!',
+    instr: 'Turn your wrist to aim. Flick to throw!',
     word: 'AIM!',
     demo: 'aim',
     minPlayers: 1,

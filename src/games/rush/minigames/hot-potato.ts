@@ -60,7 +60,7 @@ export const hotPotato: MinigameDef = {
   meta: {
     id: 'hot-potato',
     name: 'Hot Potato',
-    instr: 'Flick to pass the bomb!',
+    instr: 'Got the bomb? Flick your wrist to pass it!',
     word: 'SAFE',
     demo: 'flick',
     minPlayers: 3,

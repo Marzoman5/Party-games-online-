@@ -564,6 +564,9 @@ export class MotionProcessor {
         const y = dm > 1e-6 ? Math.round((100 * d[1]) / dm) : 0;
         this.lastActive = t;
         this.emit('flick', v, x, y, this.flickOnset);
+        // Quick Draw: a `raise` is simply a quick snap of the phone from ANY grip (pointing the phone at the
+        // floor first turned out to be confusing and awkward when sitting down).
+        this.emit('raise', 0, 0, 0, this.flickOnset);
         this.flickState = 'refr';
       }
       return;
@@ -722,7 +725,9 @@ export class MotionProcessor {
         if (p > MT.RAISE_HIGH_DEG) {
           if (t - this.raiseT <= MT.RAISE_WINDOW * 1000) {
             this.lastActive = t;
-            this.emit('raise', 0, 0, 0, this.raiseT);
+            // Phones without a gyro can't see a pure wrist rotation as a flick: keep the classic
+            // "point down, then raise" path for them.
+            if (!this.hasGyro) this.emit('raise', 0, 0, 0, this.raiseT);
           }
           this.raiseState = 'idle';
         } else if (p < low) this.raiseState = 'armed';
