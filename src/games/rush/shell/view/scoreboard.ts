@@ -163,7 +163,7 @@ export class Scoreboard {
       setText(r.name, e.name);
       r.name.style.color = e.color;
       const st = sh.streak(e);
-      setText(r.streak, st > 0 && sh.roundsPlayed > 1 ? `🔥 +${st} last ${Math.min(LOOP.streakRounds, sh.roundsPlayed)}` : '');
+      setText(r.streak, st > 0 && sh.roundsPlayed > 1 ? (two ? `🔥 +${st}` : `🔥 +${st} last ${Math.min(LOOP.streakRounds, sh.roundsPlayed)}`) : '');
       setText(r.pts, String(e.pts));
       const fresh = e.lastRound === sh.roundsPlayed && e.lastPts > 0 && sh.roundsPlayed > 0;
       setText(r.plus, fresh ? `+${e.lastPts}` : '');

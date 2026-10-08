@@ -277,3 +277,7 @@ Durations are hard caps per heat [1,2,3] (seconds). "Scale" = behaviour at 1 / 2
 - SHELL: Rush overlays mark test ids with `data-rtid`; `StageView` sets `data-testid` only on the layers that
   are actually visible (HostUI's `data-tid` would tag hidden layers too). Only `rush-stage` uses `data-tid`.
 - LEAD: Tug of War implements `teamOf` (team reaches phones as `me.team`).
+- LEAD (TEST findings fixed): snapshot keeps current/most recent players when the 64-player cap bites (host
+  reload lost scores late in a long party); Rush `kbd` hints readable; `drawToken` gains `labelMaxWidth`
+  (Tug of War / Quick Draw names no longer overlap); 9+ player scoreboard gives names the room (no "+N" chip,
+  short streak); phone says TAP instead of FLICK for touch players; phone header fits 14-char names.

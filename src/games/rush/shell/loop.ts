@@ -1315,7 +1315,10 @@ export class RushShell {
 
   snapshot(): unknown {
     const players = [...this.entries.values()]
-      .filter((e) => e.pts > 0 || e.everHere)
+      .filter((e) => (e.pts > 0 || e.everHere) && !(e.removedAt && e.pts === 0))
+      // Keep the people who matter if the cap bites (a long evening sees many phones): current players
+      // first, then the most recently active, so a host reload never wipes the scores of who's here.
+      .sort((a, b) => (a.removedAt ? 1 : 0) - (b.removedAt ? 1 : 0) || (a.hidden ? 1 : 0) - (b.hidden ? 1 : 0) || b.lastRound - a.lastRound || b.pts - a.pts)
       .slice(0, 64)
       .map((e) => ({ id: e.id, name: e.name, emoji: e.emoji, color: e.color, slot: e.slot, pts: e.pts, wins: e.wins, rounds: e.rounds, hist: e.hist.map((h) => [h.r, h.p]), touch: e.touch }));
     return {

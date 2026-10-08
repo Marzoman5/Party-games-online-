@@ -86,6 +86,8 @@ export const quickDraw: MinigameDef = {
     let fastest: Cowboy | null = null;
     let drawFlashT = -10;
     let tokenR = 60;
+    /** Spacing between neighbouring cowboys (name width cap). */
+    let labelW = 240;
     let rows = 1;
     /** Final standings (computed once the round is over), for the end-of-round TV state. */
     let final: Map<Cowboy, { place: number; avg: number; allOut: boolean }> | null = null;
@@ -426,6 +428,7 @@ export const quickDraw: MinigameDef = {
         const span = 1760;
         const gap = span / perRow;
         tokenR = clamp(gap * 0.27, 30, 80);
+        labelW = Math.max(90, gap - 10);
         c.players.forEach((p, idx) => {
           const row = rows === 1 ? 0 : idx < perRow ? 0 : 1;
           const inRow = rows === 1 ? n : row === 0 ? perRow : n - perRow;
@@ -510,7 +513,7 @@ export const quickDraw: MinigameDef = {
           const sway = phase === 'wait' ? Math.sin(t * 2 + c.idx) * 3 : 0;
           const jump = c.cur?.kind === 'ok' ? Math.max(0, 1 - (ctx.time - c.popT) * 4) * 20 : 0;
           g.fillStyle = '#000'; // emoji/touch badge alpha follows fillStyle
-          drawToken(g, c.p, c.x + sway, c.y - jump, tokenR, { dim: !on, touchBadge: false, ring: isFast ? PAL.gold : c.cur?.kind === 'out' ? PAL.bad : undefined });
+          drawToken(g, c.p, c.x + sway, c.y - jump, tokenR, { dim: !on, touchBadge: false, labelMaxWidth: labelW, ring: isFast ? PAL.gold : c.cur?.kind === 'out' ? PAL.bad : undefined });
           hat(g, c.x + sway, c.y - jump - tokenR * 0.8, tokenR, c.p.color);
           if (c.p.touch) emoji(g, '👆', c.x + sway - tokenR * 0.95, c.y - jump - tokenR * 0.35, tokenR * 0.55, on ? 1 : 0.4);
           // status chip

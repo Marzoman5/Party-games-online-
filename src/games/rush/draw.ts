@@ -99,6 +99,8 @@ export interface TokenOpts {
   rot?: number;
   /** Label size multiplier. */
   labelScale?: number;
+  /** Max name width (stage units) — pass the spacing between neighbouring tokens so names never overlap. */
+  labelMaxWidth?: number;
 }
 
 /**
@@ -141,7 +143,7 @@ export function drawToken(g: CanvasRenderingContext2D, p: Pick<RushPlayer, 'name
     const pos = opts.labelPos ?? 'below';
     const lx = pos === 'right' ? x + r + 12 : x;
     const ly = pos === 'below' ? y + r + ls * 0.75 : pos === 'above' ? y - r - ls * 0.7 : y;
-    drawText(g, p.name, lx, ly, ls, dim ? '#999' : p.color, { align: pos === 'right' ? 'left' : 'center', maxWidth: pos === 'right' ? undefined : Math.max(r * 4, 160) });
+    drawText(g, p.name, lx, ly, ls, dim ? '#999' : p.color, { align: pos === 'right' ? 'left' : 'center', maxWidth: opts.labelMaxWidth ?? (pos === 'right' ? undefined : Math.max(r * 4, 160)) });
   }
 }
 

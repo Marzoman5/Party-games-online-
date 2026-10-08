@@ -56,6 +56,7 @@
 
 .rush-frame kbd {
   display: inline-block;
+  color: #fff;
   padding: 0 calc(var(--su) * 10);
   border-radius: calc(var(--su) * 8);
   border: calc(var(--su) * 2) solid rgba(255, 255, 255, 0.5);
@@ -294,7 +295,11 @@
   100% { transform: none; opacity: 1; }
 }
 
+.rush-two .rush-row { gap: calc(var(--su) * 10); padding: 0 calc(var(--su) * 14); }
 .rush-two .rush-row-name { font-size: calc(var(--su) * 40); }
+.rush-two .rush-row-rank { width: calc(var(--su) * 44); font-size: calc(var(--su) * 42); }
+/* 9+ players: the streak line already shows recent gains — give the name the room. */
+.rush-two .rush-row-plus { display: none; }
 .rush-two .rush-row-pts { font-size: calc(var(--su) * 54); min-width: calc(var(--su) * 90); }
 .rush-two .rush-row-streak, .rush-two .rush-row-tag { font-size: calc(var(--su) * 22); }
 .rush-two .rush-row { gap: calc(var(--su) * 12); padding: 0 calc(var(--su) * 14); }

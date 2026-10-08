@@ -635,7 +635,8 @@ export class RushView implements ControllerLayout {
       }
       case 'play': {
         const cue = m!.cue;
-        const word = cue?.word ?? m!.word;
+        // Touch players tap instead of flicking: never tell them to FLICK.
+        const word = (cue?.word ?? m!.word).replace(/\bFLICK\b/g, touch ? 'TAP' : 'FLICK');
         if (cue?.show === 'bomb') {
           const v = Math.max(0, Math.min(1, cue.v ?? 0));
           this.setWord(word || 'PASS IT!', 'w-big w-bomb', 22);

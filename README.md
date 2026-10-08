@@ -466,6 +466,27 @@ npx tsx src/games/smash/sim/dev/selftest.ts         # Smash simulation self-test
 npx tsx src/games/smash/sim/ai/dev/aiSoak.ts        # CPU-vs-CPU soak (match length, recovery, level ladder)
 ```
 
+**Party Rush coverage** (`tests/rush-*.spec.ts`, ~20 min; `npm run test:rush`, `npm run test:motion`): real
+phone pages (iPhone + Android portrait) join with one tap, play touch-fallback rounds and get results, and a
+sensor flick through the motion injector reaches the host; every one of the 10 minigames with 1 (solo bots),
+4 and 16 bot phones (every participant ranked once, points exactly N..1 / ties share / +2 for 1st, board
+totals add up, phone result = host row, zero errors); mid-round join plays next round; idle → away with no
+penalty and back on tap; hidden tab → away; disconnect/reconnect keeps the score; host reload restores the
+scoreboard; 3 minutes of random Space/P/S/R/Esc; a throwing minigame → "Oops — skipping that one!"; the
+no-HTTPS notices; 6 players: Kart and Smash seat the first 4 and park 2 ("watching this one"), back to Rush
+with all 6; TV screenshots of the scoreboard and every minigame at 4 and 16 players (`docs/screenshots/30-*`,
+`31-*`). Headless: `npm run test:rush` runs every minigame × 1–16 players × heat 1–3 with leavers and touch
+players; `npm run test:motion` drives the gesture detectors with synthetic iPhone/Android traces (a small
+wrist flick registers once, a slow drift / walking / a phone on a table don't).
+
+**Party Rush soak** (`npx tsx scripts/rush-soak.ts --bots 16 --rounds 200`): 16 bot phones, random host
+keys, drops/reconnects, hidden tabs, idle phones, leavers replaced by new phones, max-heat changes and host
+reloads. Run 1 reached **169 rounds** (85 rounds/h) across heat 1–3 with **zero stuck phases, zero page or
+shell errors and every round's points valid**; its one failure (after ~80 distinct phones, a host reload
+dropped current players' scores — the snapshot kept the first 64 players ever seen) is fixed. Run 2, 45
+rounds, clean. Relay traffic with 16 phones: ~4 KB/s into the host (147 frames/s, largest 188 B), ~14 KB/s
+out; largest Rush message 473 B (the biggest frame is the 16-player hub state, 3.7 KB; limit 16 KB).
+
 **Smash Party coverage** (`tests/smash-*.spec.ts`, ~12 min): a deterministic **combat unit test**
 (knockback formula vs hand-computed values, then real hits in the simulation at several %: knockback and
 launch distance match the formula); hub QR + 4 bots joining once, leader picks Smash, phone layouts swap;
@@ -609,6 +630,23 @@ Judgment calls made while building (the brief said "decide, document, keep going
   host page once (browser autoplay rules).
 - Fonts are system fonts (Impact etc.) — no web fonts, so the look varies slightly per OS.
 - No online play and no battle mode (out of scope).
+
+### Party Rush — known limitations
+
+- **Motion feel is tuned against synthetic sensor traces and bots, not real phones yet.** Thresholds live in
+  `src/phone/motion/tuning.ts` and `src/games/rush/tuning.ts`; expect to adjust them after the first party.
+- **Motion needs HTTPS** (`npm run start:https`, self-signed certificate). Over plain HTTP every phone uses
+  the touch fallback (a slightly worse experience; marked 👆 on the TV).
+- iOS asks for motion permission on every page load (the join tap does it); iOS has no vibration, so cues are
+  flash + sound there.
+- Aim (Darts) integrates the gyro and slowly drifts; it re-centres on every dart and on a double tap.
+- Tilt Maze layouts are generated per round (always solvable, length-checked) rather than hand-made.
+- Darts at 16 players gets crowded around the bull (everyone aims there).
+- Kart Party and Smash Party still seat 4 per match (the first 4 by join order); the others watch.
+- Characters stay unique only for the first 8 players (the Kart/Smash roster has 8).
+- Headings use the system font (no web fonts): punchier on Windows/macOS than on Linux.
+- Pre-existing, Kart: rarely, three.js's parallel shader warm-up (`Game.warmShaders` → `compileAsync`) throws
+  an uncaught error if a session is torn down mid-compile (seen once in a full suite run, passes on re-run).
 
 ## Credits & licenses
 

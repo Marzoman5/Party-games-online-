@@ -484,7 +484,10 @@ export const tugOfWar: MinigameDef = {
           g.arc(x, y, tpos.r + 11, 0, Math.PI * 2);
           g.fill();
           const ring = present && age < 0.45 && tp.lastStrength >= T.onBeat ? PAL.gold : undefined;
-          drawToken(g, tp.p, x, y, tpos.r, { dim: !present, rot, wobble, ring, labelPos: tpos.above ? 'above' : 'below', labelScale: 0.95 });
+          const mT = teams[tp.team].length;
+          // Neighbours in the same row (rows alternate) are two pulls apart.
+          const rowGap = mT > 1 ? 2 * Math.min(150, SPREAD / (mT - 1)) : 300;
+          drawToken(g, tp.p, x, y, tpos.r, { dim: !present, rot, wobble, ring, labelPos: tpos.above ? 'above' : 'below', labelScale: 0.95, labelMaxWidth: Math.max(90, rowGap - 12) });
           // mud on losers
           if (over && wTeam !== -1 && tp.team !== wTeam) {
             g.fillStyle = 'rgba(90,55,20,0.55)';

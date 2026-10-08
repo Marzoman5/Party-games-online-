@@ -62,7 +62,8 @@
 }
 .rz-name {
   font-weight: 900;
-  font-size: min(7.5vw, 4.4vh);
+  /* fits the 14-character names (e.g. "Bouncy Banana") next to the emoji + timer on a 360 px phone */
+  font-size: min(6.4vw, 4.2vh);
   line-height: 1.05;
   overflow: hidden;
   text-overflow: ellipsis;
