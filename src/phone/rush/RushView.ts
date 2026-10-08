@@ -25,7 +25,7 @@ import { LEFT_BY_CHOICE } from '../screens/join';
 import { button, h, ordinal, setHtml, setText, show, toggleClass } from '../ui';
 import { POSE_LABELS, POSE_SWIPES, bombSvg, demoSvg, fishSvg, gripSvg, poseSvg } from './art';
 import { fireCue, restartAnim } from './cues';
-import { joinTap, onRushRuntime, rush, sendMg, setManualTouch, touchMode } from './runtime';
+import { joinTap, motionStatus, onRushRuntime, pollMotion, rush, sendMg, setManualTouch, touchMode } from './runtime';
 import { sfx, unlockAudio } from './sound';
 import { TouchPad, type TouchEventOut } from './touch';
 
@@ -115,7 +115,8 @@ export class RushView implements ControllerLayout {
   /** Cue bookkeeping: id seen last + when it arrived (phone-measured reaction times). */
   private cueId = -1;
   private cueAt = 0;
-  private configuredRid = -1;
+  private configuredKey = '';
+  private motionNote!: HTMLElement;
   private calibratedRid = -1;
   private lastCd = -1;
   private lastPh = '';
@@ -210,6 +211,7 @@ export class RushView implements ControllerLayout {
         this.menuEmoji,
         h('label', { class: 'rz-menu-field' }, h('span', { text: 'Your name' }), this.nameInput),
         h('div', { class: 'rz-menu-row' }, h('div', null, h('b', { text: 'Touch controls 👆' }), h('small', { text: 'Tap & swipe instead of moving the phone' })), this.touchTgl),
+        (this.motionNote = h('small', { class: 'rz-menu-note', testid: 'rush-motion-status' })),
         h('div', { class: 'rz-menu-row' }, h('div', null, h('b', { text: 'Vibration' }), h('small', { text: vibOk ? 'Buzz on cues' : 'Not supported on this phone' })), this.vibTgl),
         this.leaveBtn,
         button('Done', 'rush-menu-close', () => this.openMenu(false), 'rz-menu-done'),
@@ -306,6 +308,7 @@ export class RushView implements ControllerLayout {
     const m = state.rush;
     const now = performance.now();
     const events = motion.drain();
+    pollMotion();
     if (!m || document.visibilityState === 'hidden') return;
     const st = m.me.st;
     const live = rush.tapped && st === 'play';
@@ -401,6 +404,7 @@ export class RushView implements ControllerLayout {
   private syncMenu(): void {
     const me = this.me();
     setHtml(this.menuEmoji, `<span class="rz-swatch" style="background:${me.color}">${me.emoji}</span><b>${me.name.replace(/[<>&]/g, '')}</b>`);
+    setText(this.motionNote, motionStatus());
     this.touchTgl.setAttribute('aria-checked', String(rush.manualTouch));
     toggleClass(this.touchTgl, 'on', rush.manualTouch);
     this.vibTgl.setAttribute('aria-checked', String(settings.vibration));
@@ -528,8 +532,12 @@ export class RushView implements ControllerLayout {
 
   private bookkeep(m: RushPhoneMsg, now: number): void {
     const inRound = m.ph === 'intro' || m.ph === 'count' || m.ph === 'play';
-    if (inRound && m.rid !== this.configuredRid) {
-      this.configuredRid = m.rid;
+    // The host only announces the stream + events from 'count' on (they are null/empty during the UP NEXT
+    // intro), so configuring once per rid would lock the detectors to "nothing" for the whole round:
+    // re-configure whenever what the round listens for changes.
+    const cfgKey = `${m.rid}|${m.s ?? ''}|${m.ev.join(',')}`;
+    if (inRound && cfgKey !== this.configuredKey) {
+      this.configuredKey = cfgKey;
       motion.configure(m.s, m.ev);
       this.pad.configure(m.s, m.ev);
       this.lastCd = -1;

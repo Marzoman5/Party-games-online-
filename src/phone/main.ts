@@ -84,6 +84,8 @@ window.__phone = {
         motionOk: rush.motionOk,
         manualTouch: rush.manualTouch,
         touch: touchMode(),
+        // Full pipeline debug (processor internals) for diagnosing real phones.
+        raw: (motion as unknown as { state?: () => unknown }).state?.() ?? null,
       };
     },
   },

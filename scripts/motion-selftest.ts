@@ -121,12 +121,12 @@ for (const v of [...ALL, V_NOGYRO]) {
   run(shakeTrace(v, 2, 0.04, 8, 3), v, 'shake', [], (p, s) => s > 1.6 && (envG += p.shakeEnv));
   const mg = Math.round(mean(eG));
   const mh = Math.round(mean(hard));
-  check('shake gentle energy', v.name, mg >= 250 && mg <= 600, mg, '250..600');
+  check('shake gentle energy', v.name, mg >= 650 && mg <= 950, mg, '650..950');
   const cg = g2.p.sample()[1];
   check('shake gentle count (12 half-cycles)', v.name, cg >= 9 && cg <= 15, cg, '9..15');
   const ratioRaw = envH / envG;
   const ratioOut = mh / mg;
-  check('shake hard energy (compressed)', v.name, mh > mg + 150 && mh <= 1000 && ratioOut < 0.5 * ratioRaw, `${mh} (x${ratioOut.toFixed(1)} vs raw x${ratioRaw.toFixed(1)})`, '>gentle+150, gain < half raw');
+  check('shake hard energy (compressed)', v.name, mh > mg + 50 && mh <= 1000 && ratioOut < 0.5 * ratioRaw, `${mh} (x${ratioOut.toFixed(1)} vs raw x${ratioRaw.toFixed(1)})`, '>gentle+50, gain < half raw');
   const ch = h.p.sample()[1];
   check('shake hard count (30 half-cycles)', v.name, ch >= 22 && ch <= 36, ch, '22..36');
   void gentle;
@@ -284,7 +284,7 @@ const TILT_GRIPS: { name: string; R: M3 }[] = [
 ];
 for (const v of [...ALL, V_NOGYRO]) {
   for (const g of TILT_GRIPS) {
-    const path = new Path(g.R).hold(1).rot(WY, 15, 0.3).hold(0.7).rot(WY, -15, 0.3).hold(0.5).rot(WX, -15, 0.3).hold(0.7);
+    const path = new Path(g.R).hold(1).rot(WY, 7.5, 0.3).hold(0.7).rot(WY, -7.5, 0.3).hold(0.5).rot(WX, -7.5, 0.3).hold(0.7);
     let aR = 0, bR = 0, aF = 0, bF = 0, a0 = 0;
     run(gen(path, path.duration, v), v, 'tilt', [], (p, sec) => {
       const o = p.sample();
@@ -294,8 +294,8 @@ for (const v of [...ALL, V_NOGYRO]) {
     });
     const ok0 = Math.abs(a0) < 40;
     check(`tilt ${g.name}: neutral at calibrate`, v.name, ok0, a0, '|a|<40');
-    check(`tilt ${g.name}: 15° right`, v.name, Math.abs(aR - 474) < 90 && Math.abs(bR) < 90, `a=${aR} b=${bR}`, 'a≈+474 b≈0');
-    check(`tilt ${g.name}: 15° forward`, v.name, Math.abs(bF - 474) < 90 && Math.abs(aF) < 90, `a=${aF} b=${bF}`, 'a≈0 b≈+474');
+    check(`tilt ${g.name}: 7.5° right`, v.name, Math.abs(aR - 474) < 90 && Math.abs(bR) < 90, `a=${aR} b=${bR}`, 'a≈+474 b≈0');
+    check(`tilt ${g.name}: 7.5° forward`, v.name, Math.abs(bF - 474) < 90 && Math.abs(aF) < 90, `a=${aF} b=${bF}`, 'a≈0 b≈+474');
   }
 }
 
@@ -315,7 +315,7 @@ for (const v of [...ALL, V_NOGYRO]) {
     check('raise after holster -> 1', v.name, n === 1, `${n}${e ? ` (t+${Math.round(lat)}ms)` : ''}`, '1');
   }
   {
-    const path = new Path(turn(R_HOLSTER, WX, 55)).hold(1).rot(WX, 35, 0.25).hold(1);
+    const path = new Path(turn(R_HOLSTER, WX, 80)).hold(1).rot(WX, 35, 0.25).hold(1);
     const n = count(run(gen(path, path.duration, v), v, 'pitch', ['raise']).ev, 'raise');
     check('raise without holster -> 0', v.name, n === 0, n, '0');
   }
@@ -354,9 +354,9 @@ for (const v of ALL) {
       if (sec > 2.95 && sec < 3.0) [x2, y2] = o;
     }, [0.6, 1.95]);
     const tol = 70;
-    check(`aim ${g.name}: 10° yaw right`, v.name, Math.abs(x1 - 400) < tol && Math.abs(y1) < tol, `x=${x1} y=${y1}`, 'x≈+400 y≈0');
+    check(`aim ${g.name}: 10° yaw right`, v.name, Math.abs(x1 - 769) < tol && Math.abs(y1) < tol, `x=${x1} y=${y1}`, 'x≈+769 y≈0');
     check(`aim ${g.name}: calibrate re-centres`, v.name, Math.abs(xc) < 40, xc, '|x|<40');
-    check(`aim ${g.name}: 10° pitch up`, v.name, Math.abs(y2 - 400) < tol && Math.abs(x2) < tol, `x=${x2} y=${y2}`, 'x≈0 y≈+400');
+    check(`aim ${g.name}: 10° pitch up`, v.name, Math.abs(y2 - 769) < tol && Math.abs(x2) < tol, `x=${x2} y=${y2}`, 'x≈0 y≈+769');
   }
 }
 
@@ -368,7 +368,7 @@ for (const v of ALL) {
   run(gen(path, path.duration, v), v, 'aim', [], (p, sec) => {
     if (sec > 1.75) x1 = p.sample()[0];
   });
-  check('aim (no gyro): 10° right tilt', v.name, Math.abs(x1 - 400) < 90, x1, 'x≈+400');
+  check('aim (no gyro): 10° right tilt', v.name, Math.abs(x1 - 769) < 90, x1, 'x≈+769');
 }
 
 // rad/s gyro (old Android): handled after some natural handling
@@ -381,7 +381,7 @@ for (const v of ALL) {
     if (sec > handle.duration - 0.1) x1 = p.sample()[0];
   }, [handle.duration - 1.5]);
   check('gyro units self-check (rad/s → deg/s)', v.name, Math.abs(r.p.gyroK - 57.2958) < 0.01, r.p.gyroK.toFixed(2), '57.30');
-  check('aim with rad/s gyro: 10° yaw', v.name, Math.abs(x1 - 400) < 70, x1, 'x≈+400');
+  check('aim with rad/s gyro: 10° yaw', v.name, Math.abs(x1 - 769) < 70, x1, 'x≈+769');
   const v2: Variant = { name: 'android-deg/s', gen: {}, via: 'direct' };
   const r2 = run(gen(handle, handle.duration, v2), v2, 'aim', []);
   check('gyro units self-check (deg/s kept)', v2.name, r2.p.gyroK === 1 && r2.p.gyroChecked, `${r2.p.gyroK} checked=${r2.p.gyroChecked}`, '1, checked');

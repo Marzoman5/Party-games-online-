@@ -44,35 +44,35 @@ export const MT = {
 
   // ------------------------------------------------------------------ shake
   /** Intensity = |lin| + |gyro| * SHAKE_GYRO_W − SHAKE_FLOOR (m/s²-equivalent). */
-  SHAKE_GYRO_W: 1 / 60,
-  SHAKE_FLOOR: 0.4,
+  SHAKE_GYRO_W: 1 / 40,
+  SHAKE_FLOOR: 0.3,
   /** Pre-smoothing of the rectified intensity (removes the 2x-shake-frequency ripple). */
   SHAKE_PRE_TC: 0.08,
   /** Envelope attack / release. */
   SHAKE_ATTACK_TC: 0.15,
   SHAKE_RELEASE_TC: 0.4,
   /** Envelope value that maps to 100 % before compression (a brisk shake ≈ 15–20). */
-  SHAKE_FULL: 14,
+  SHAKE_FULL: 5.5,
   /** Linear up to this fraction, then exponential diminishing returns toward 1 (safety: flailing ≈ brisk). */
   SHAKE_KNEE: 0.7,
   /** Half-cycle counter: a new lobe needs accel this strong pointing against the previous lobe. */
-  SHAKE_COUNT_HI: 3.2,
+  SHAKE_COUNT_HI: 1.8,
   /** Minimum time between counted half-cycles (s) — 12 half-cycles/s max. */
   SHAKE_COUNT_MIN_GAP: 0.07,
   /** Lobe tracking forgets after this long below SHAKE_COUNT_LO (s). */
-  SHAKE_COUNT_LO: 1.5,
+  SHAKE_COUNT_LO: 0.9,
   SHAKE_COUNT_FORGET: 0.5,
 
   // ------------------------------------------------------------------ flick
   /** Flick score s = |lin| / FLICK_LIN_REF + |gyro| / FLICK_GYRO_REF (with gyro). */
-  FLICK_LIN_REF: 5,
-  FLICK_GYRO_REF: 220,
+  FLICK_LIN_REF: 3.8,
+  FLICK_GYRO_REF: 165,
   /** Fires when s crosses this. Small wrist flick (6 m/s², 200 deg/s) peaks ≈ 1.6–2; walking ≈ 0.5–0.8. */
   FLICK_THR: 1.0,
   /** Without a gyro: s = |lin| / FLICK_LIN_REF_NOGYRO. */
-  FLICK_LIN_REF_NOGYRO: 4.5,
+  FLICK_LIN_REF_NOGYRO: 3.4,
   /** Adaptive gate: also needs s > FLICK_BASE_K * the 1 s background level (continuous motion raises it). */
-  FLICK_BASE_K: 2.4,
+  FLICK_BASE_K: 2.2,
   FLICK_BASE_TC: 1.0,
   /** Emit at the peak (s falling below this fraction of the peak) or this long after onset (s). */
   FLICK_PEAK_FALL: 0.8,
@@ -82,7 +82,7 @@ export const MT = {
   FLICK_REARM: 0.7,
   /** Strength: threshold → FLICK_V_MIN, FLICK_HARD_S → 100. */
   FLICK_V_MIN: 15,
-  FLICK_HARD_S: 6,
+  FLICK_HARD_S: 4,
 
   // ------------------------------------------------------------------ still / table / activity
   /** Window (EMA of squares) for movement RMS. */
@@ -113,30 +113,30 @@ export const MT = {
 
   // ------------------------------------------------------------------ pose
   /** Enter a pose within this angle of its axis; leave when farther than POSE_EXIT_DEG (hysteresis). */
-  POSE_ENTER_DEG: 35,
-  POSE_EXIT_DEG: 45,
+  POSE_ENTER_DEG: 40,
+  POSE_EXIT_DEG: 50,
   /** A candidate must be held this long to become the stable pose (and fire the event). */
   POSE_HOLD: 0.3,
 
   // ------------------------------------------------------------------ tilt
   /** ±1000 = ±TILT_FULL_DEG from the neutral captured at calibrate(). */
-  TILT_FULL_DEG: 30,
-  TILT_DEADZONE_DEG: 1.5,
+  TILT_FULL_DEG: 15,
+  TILT_DEADZONE_DEG: 1.0,
   TILT_SMOOTH_TC: 0.08,
 
   // ------------------------------------------------------------------ pitch / raise
   /** Holstered: pitch below RAISE_LOW_DEG for RAISE_HOLSTER seconds arms the detector. */
-  RAISE_LOW_DEG: -45,
+  RAISE_LOW_DEG: -20,
   RAISE_HOLSTER: 0.2,
   /** Raised: pitch above RAISE_HIGH_DEG within RAISE_WINDOW seconds of leaving the holster. */
-  RAISE_HIGH_DEG: -20,
-  RAISE_WINDOW: 0.6,
+  RAISE_HIGH_DEG: -5,
+  RAISE_WINDOW: 0.7,
 
   // ------------------------------------------------------------------ aim
   /** ±1000 = ±AIM_FULL_DEG of wrist rotation from the re-centre point. */
-  AIM_FULL_DEG: 25,
+  AIM_FULL_DEG: 13,
   /** The integrator clamps a bit past full scale so coming back responds immediately. */
-  AIM_CLAMP_DEG: 28,
+  AIM_CLAMP_DEG: 15,
   /** Slow drift correction: aim decays toward the centre with this tc (s). */
   AIM_DECAY_TC: 30,
 } as const;

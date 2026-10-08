@@ -118,6 +118,29 @@ function finish(): void {
   changed();
 }
 
+/**
+ * Late upgrade (called from the layout's tick): some phones deliver their first sensor reading well after
+ * the join tap (or the permission prompt was answered late). Once real data flows, switch to motion.
+ */
+export function pollMotion(): void {
+  if (!rush.tapped || rush.motionOk || rush.manualTouch) return;
+  if (motion.enabled && motion.hasData) {
+    rush.motionOk = true;
+    sendMode();
+    changed();
+  }
+}
+
+/** One human-readable line for the corner menu: is motion working on this phone, and if not, why. */
+export function motionStatus(): string {
+  if (rush.manualTouch) return 'Touch controls are switched on above';
+  if (rush.motionOk && motion.hasData) return 'Motion sensors: working ✓';
+  if (typeof window !== 'undefined' && !window.isSecureContext) return 'Motion is off: this page was opened with http, not https. Scan the QR code on the TV again.';
+  if (!rush.tapped) return 'Motion sensors start when you tap to play';
+  if (motion.enabled) return 'Motion is allowed, but this phone is sending no sensor data';
+  return 'Motion was not allowed. Close this tab, scan the QR code again and tap Allow.';
+}
+
 /** Corner menu toggle. */
 export function setManualTouch(on: boolean): void {
   rush.manualTouch = on;

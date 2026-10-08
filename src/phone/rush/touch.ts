@@ -40,6 +40,15 @@ const SWIPE_PX = 34;
 const DOUBLE_MS = 300;
 const TAP_MOVE_PX = 14;
 const FLICK_REFRACTORY_MS = 200;
+// Fairness handicaps: touch must never beat a player who moves their phone.
+/** Mash rate (taps/s) for the top energy, and the most energy mashing can ever reach (motion: 1000). */
+const MASH_FULL_RATE = 11;
+const MASH_MAX_ENERGY = 800;
+/** Added to touch reaction times (ms): a tap / swipe is quicker than raising or turning a phone. */
+const TOUCH_RAISE_HANDICAP_MS = 220;
+const TOUCH_POSE_HANDICAP_MS = 350;
+/** A held thumb reads as this much movement (0..1000): a real hand always trembles a little. */
+const TOUCH_STILL_FLOOR = 55;
 
 export class TouchPad {
   readonly el: HTMLElement;
@@ -264,7 +273,7 @@ export class TouchPad {
     this.face.classList.remove('bump');
     void this.face.offsetWidth;
     this.face.classList.add('bump');
-    if (this.ev.includes('pose') || this.stream === 'pose') this.emit({ k: 'pose', v: p, x: 0, y: 0, t });
+    if (this.ev.includes('pose') || this.stream === 'pose') this.emit({ k: 'pose', v: p, x: 0, y: 0, t: t + TOUCH_POSE_HANDICAP_MS });
   }
 
   private flick(t: number): void {
@@ -278,7 +287,7 @@ export class TouchPad {
     void this.face.offsetWidth;
     this.face.classList.add('bump');
     if (this.ev.includes('flick')) this.flick(t);
-    else if (this.ev.includes('raise')) this.emit({ k: 'raise', v: 0, x: 0, y: 0, t });
+    else if (this.ev.includes('raise')) this.emit({ k: 'raise', v: 0, x: 0, y: 0, t: t + TOUCH_RAISE_HANDICAP_MS });
     else this.emit({ k: 'tap', v: 0, x: 0, y: 0, t });
   }
 
@@ -296,7 +305,7 @@ export class TouchPad {
       case 'shake': {
         while (this.taps.length && now - this.taps[0] > 1000) this.taps.shift();
         const rate = this.taps.length; // taps in the last second
-        const target = clamp((rate / 8) * 1000, 0, 1000);
+        const target = clamp((rate / MASH_FULL_RATE) * 1000, 0, MASH_MAX_ENERGY);
         this.energy += (target - this.energy) * (target > this.energy ? 0.45 : 0.18);
         return [Math.round(this.energy), Math.min(1000, this.tapCount), 0];
       }
@@ -308,11 +317,10 @@ export class TouchPad {
         const held = this.pid !== null;
         const d = this.drift;
         this.drift = 0;
-        let target = held ? clamp((d - 1.5) * 45, 0, 1000) : 650;
-        if (held && now - this.downAt < 250) target = 0; // landing the thumb isn't "moving"
+        let target = held ? clamp((d - 1.5) * 45, TOUCH_STILL_FLOOR, 1000) : 650;
+        if (held && now - this.downAt < 250) target = TOUCH_STILL_FLOOR; // landing the thumb isn't "moving"
         this.stillA += (target - this.stillA) * 0.5;
-        if (this.stillA < 8) this.stillA = 0;
-        this.stillC = clamp(this.stillC + this.stillA / 60, 0, 1000);
+                this.stillC = clamp(this.stillC + this.stillA / 60, 0, 1000);
         toggleClass(this.el, 'holding', held);
         setText(this.label, held ? (this.stillA > 120 ? 'STEADY!' : 'HOLDING ✓') : 'HOLD');
         return [Math.round(this.stillA), 0, Math.round(this.stillC)];

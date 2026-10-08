@@ -167,7 +167,7 @@ export function createMotion(): MotionApi & { state(): MotionState } {
       }
       listen();
       enabled = true;
-      return waitForData(1500);
+      return waitForData(3000);
     });
   };
 

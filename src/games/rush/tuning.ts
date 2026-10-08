@@ -76,7 +76,7 @@ export const QUICK_DRAW = {
   /** Raises in the first moments of the wait are ignored (people still settling). */
   earlyGraceSec: 0.4,
   /** Pitch (tenths of a degree) below which a phone counts as "holstered" (pointing down). */
-  downPitch: -350,
+  downPitch: -150,
   /** Fake-outs: minimum gap between fakes and no fake this close (s) before the real DRAW. */
   fakeGapSec: 1.1,
   fakeQuietBeforeDrawSec: 0.7,
@@ -195,7 +195,7 @@ export const TUG_OF_WAR = {
   /** First beat this long after GO (s). */
   firstBeatSec: 0.7,
   /** On-beat window (± ms), judged from the phone-measured ms since the beat cue. */
-  windowMs: 160,
+  windowMs: 220,
   /** Pull strengths: on the beat / off the beat / mashing (more than `mashAfter` pulls in one beat). */
   onBeat: 1.0,
   offBeat: 0.25,
