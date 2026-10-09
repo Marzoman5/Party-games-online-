@@ -37,11 +37,12 @@ To release:
 
 1. PR: `npm version 1.1.0 --no-git-tag-version` (updates `package.json` + lock), and in `CHANGELOG.md` rename
    *Unreleased* to `## [1.1.0] - YYYY-MM-DD` (start a fresh empty *Unreleased* above it). Merge.
-2. Tag the merge commit on `main` and push the tag:
-   ```bash
-   git fetch origin && git tag v1.1.0 origin/main && git push origin v1.1.0
-   ```
-3. `.github/workflows/release.yml` publishes the GitHub Release with that CHANGELOG section as notes. The
+2. Tag and publish, either way:
+   - on GitHub (works from a phone too): **Actions → Release → Run workflow**, version `1.1.0`. It tags the
+     tip of `main`;
+   - or from a terminal: `git fetch origin && git tag v1.1.0 origin/main && git push origin v1.1.0`.
+3. `.github/workflows/release.yml` publishes the GitHub Release with that CHANGELOG section as notes
+   (it refuses if `package.json` or the CHANGELOG don't match the version). The
    website already deployed from the merge. The version appears small on the host title screen and on the
    phone's room-code screen.
 
