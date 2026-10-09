@@ -125,6 +125,13 @@ const BENIGN: RegExp[] = [
   /favicon\.ico/i,
 ];
 
+/**
+ * Live-site runs only (`npm run test:live`): a public signalling relay that is down shows up as a failed
+ * WebSocket in the console. The app is built for that (several relays + PeerJS), so it is reported,
+ * not failed on.
+ */
+const LIVE_NOISE = /WebSocket connection to 'wss:\/\/[^']+' failed/i;
+
 export interface ErrorLog {
   errors: string[];
   /** Assert no unexpected page errors / console errors were captured. */
@@ -138,6 +145,10 @@ export function collectErrors(page: Page, label = 'page'): ErrorLog {
     if (msg.type() !== 'error') return;
     const text = msg.text();
     if (BENIGN.some((r) => r.test(text))) return;
+    if (process.env.KP_LIVE_URL && LIVE_NOISE.test(text)) {
+      console.log(`[${label} live noise] ${text}`);
+      return;
+    }
     const loc = msg.location();
     errors.push(`[${label} console.error] ${text} (${loc.url}:${loc.lineNumber})`);
   });

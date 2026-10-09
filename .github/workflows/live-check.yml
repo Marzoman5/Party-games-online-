@@ -1,0 +1,40 @@
+# After every successful deploy (and on demand): play the deployed website the way guests would —
+# a host page plus phone pages in separate browser contexts, connected over WebRTC through the REAL
+# public signalling services — with the join and per-game specs (`npm run test:live`).
+name: Live check
+
+on:
+  workflow_run:
+    workflows: ['Deploy to GitHub Pages']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Wait for the new version to be served
+        run: |
+          url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          for i in $(seq 1 30); do curl -fsS -o /dev/null "$url" && break; sleep 10; done
+      - run: npm run test:live
+        env:
+          KP_LIVE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-check-screenshots
+          path: docs/screenshots/r*.jpg
+          if-no-files-found: ignore
