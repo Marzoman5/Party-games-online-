@@ -195,39 +195,46 @@ for (const dev of DEVICES) {
 
       await waitEnginePhase(page, ['racing'], 150_000);
 
-      // Auto-accelerate is on: wait for drift speed (> 45 % of top speed), then steer with a finger
-      // on the left half + hold DRIFT with another finger (multi-touch). Retry if the kart hit a wall.
+      // Auto-accelerate is on. Drift like a player: at speed, steer with a finger on the left half and press
+      // DRIFT with another finger (multi-touch); a drift starts from that press (a hop) at drift speed. Under
+      // the software renderer the host runs at a few fps, so a single press can land while the kart is
+      // scraping a wall: keep re-pressing DRIFT (steer finger stays down), and if the kart stalls, let go
+      // and start again from a straight line.
       const zc = await center(phone.getByTestId('steer-zone'));
       const dc = await center(phone.getByTestId('btn-drift'));
+      const steerPt = { x: zc.x + 200, y: zc.y, id: 10 };
       let drifted = false;
       let sawSteer = false;
       const samples: string[] = [];
-      for (let attempt = 0; attempt < 4 && !drifted; attempt++) {
+      for (let attempt = 0; attempt < 5 && !drifted; attempt++) {
         await expect.poll(async () => (await gameState(page)).karts[0].speed, { timeout: 90_000, intervals: [500] }).toBeGreaterThan(11);
         await touch(cdp, 'touchStart', [{ ...zc, id: 10 }]);
-        await touch(cdp, 'touchMove', [{ x: zc.x + 200, y: zc.y, id: 10 }]);
-        await touch(cdp, 'touchStart', [{ x: zc.x + 200, y: zc.y, id: 10 }, { ...dc, id: 11 }]);
+        await touch(cdp, 'touchMove', [steerPt]);
+        await touch(cdp, 'touchStart', [steerPt, { ...dc, id: 11 }]);
         await expect
           .poll(async () => {
             const st = await phoneState(phone);
             return st.lastInput.steer > 0.3 && st.lastInput.drift;
           }, { timeout: 10_000 })
           .toBe(true);
-        for (let i = 0; i < 60 && !drifted; i++) {
+        for (let i = 0; i < 16 && !drifted; i++) {
           const k = (await gameState(page)).karts[0];
           if (k.lastSteer > 0.3) sawSteer = true;
-          if (i % 5 === 0) samples.push(`a${attempt} spd=${k.speed.toFixed(1)} steer=${k.lastSteer.toFixed(2)} drift=${k.isDrifting} spin=${k.isSpinning}`);
+          if (i % 2 === 0) samples.push(`a${attempt} spd=${k.speed.toFixed(1)} steer=${k.lastSteer.toFixed(2)} drift=${k.isDrifting} spin=${k.isSpinning}`);
           drifted = k.isDrifting || k.driftStage > 0;
-          // A drift starts from a fresh DRIFT press (hop) at drift speed. If the first press landed just
-          // below it (the speed threshold above is borderline), press again like a player would.
-          if (!drifted && i % 4 === 3 && k.speed > 13) {
-            await touch(cdp, 'touchStart', [{ x: zc.x + 200, y: zc.y, id: 10 }]);
-            await touch(cdp, 'touchStart', [{ x: zc.x + 200, y: zc.y, id: 10 }, { ...dc, id: 11 }]);
+          if (drifted) break;
+          if (i > 3 && k.speed < 3) break; // stuck on a wall: start over
+          if (i % 3 === 2) {
+            // Lift the DRIFT finger only (the steering finger stays down), then press again.
+            await touch(cdp, 'touchEnd', [steerPt]);
+            await sleep(150);
+            await touch(cdp, 'touchStart', [steerPt, { ...dc, id: 11 }]);
           }
-          if (!drifted) await sleep(500);
+          await sleep(400);
         }
         if (drifted) await shot(phone, p('05-race-steer-drift'));
         await touch(cdp, 'touchEnd', []);
+        if (!drifted) await sleep(1500); // straighten out before the next try
       }
       test.info().annotations.push({ type: 'drift', description: `host kart drifted from phone touches: ${drifted}` });
       expect(sawSteer, 'host kart receives the phone steering').toBe(true);
