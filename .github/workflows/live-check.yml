@@ -35,6 +35,8 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: live-check-screenshots
-          path: docs/screenshots/r*.jpg
+          name: live-check-results
+          path: |
+            docs/screenshots/r*.jpg
+            test-results/
           if-no-files-found: ignore

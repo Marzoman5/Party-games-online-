@@ -740,8 +740,9 @@ Judgment calls made while building (the brief said "decide, document, keep going
 - **Website vs `npm start` differences**: on the website a room lives in the host tab, so if that tab is
   *closed* (not reloaded) the room is gone (the Node server keeps it 30 minutes); a host reload or a tab
   takeover makes phones reconnect for a few seconds (with the server they stay connected); joining needs
-  internet for the signalling service (playing doesn't); a wrong room code takes ~12 s to report
-  "not found" (the server answers at once).
+  internet for the signalling service (playing doesn't); a wrong room code takes ~25 s to report
+  "not found" (two attempts, so a slow signalling service isn't mistaken for a wrong code; the server
+  answers at once).
 - The public signalling services (0.peerjs.com, Nostr relays) are free community services with no uptime
   promise; that's why two are used. If both are down, use the local route.
 - Split-screen renders a shadow pass per view; on weak GPUs the scaler turns shadows off.
