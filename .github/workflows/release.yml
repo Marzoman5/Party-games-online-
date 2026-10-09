@@ -1,10 +1,16 @@
-# Pushing a version tag (vMAJOR.MINOR.PATCH) publishes a GitHub Release whose notes are that
-# version's section of CHANGELOG.md.
+# Publishes a GitHub Release whose notes are that version's section of CHANGELOG.md. Two ways in:
+#   - push a version tag:   git tag v1.1.0 origin/main && git push origin v1.1.0
+#   - or, no command line:  Actions -> Release -> Run workflow -> version 1.1.0 (tags the tip of main)
 name: Release
 
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 1.1.0 (must match package.json and have a CHANGELOG.md section)'
+        required: true
 
 permissions:
   contents: write
@@ -14,17 +20,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Release notes from CHANGELOG.md
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          ver="${GITHUB_REF_NAME#v}"
-          awk -v v="$ver" '
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then ver="${INPUT_VERSION#v}"; else ver="${GITHUB_REF_NAME#v}"; fi
+          if ! echo "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "Not a MAJOR.MINOR.PATCH version: $ver" >&2; exit 1; fi
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$pkg" != "$ver" ]; then echo "package.json says $pkg, releasing $ver: bump package.json first" >&2; exit 1; fi
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+      - name: Release notes from CHANGELOG.md
+        env:
+          VER: ${{ steps.v.outputs.ver }}
+        run: |
+          awk -v v="$VER" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/ { exit }
             on { print }
           ' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then echo "No CHANGELOG.md section for $ver" >&2; exit 1; fi
+          if [ ! -s notes.md ]; then echo "No CHANGELOG.md section for $VER" >&2; exit 1; fi
           cat notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          VER: ${{ steps.v.outputs.ver }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            gh release create "v$VER" --target "$(git rev-parse HEAD)" --title "v$VER" --notes-file notes.md
+          else
+            gh release create "v$VER" --title "v$VER" --notes-file notes.md --verify-tag
+          fi

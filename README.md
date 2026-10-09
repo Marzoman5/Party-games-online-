@@ -347,8 +347,9 @@ suites on each PR). To publish a version:
    changes such as a protocol version bump).
 2. In a PR: set `"version"` in `package.json` (`npm version 1.1.0 --no-git-tag-version`), move the
    *Unreleased* notes in `CHANGELOG.md` under `## [1.1.0] - YYYY-MM-DD`, merge.
-3. Tag the merge commit and push the tag: `git tag v1.1.0 origin/main && git push origin v1.1.0`.
-   The *Release* workflow publishes a GitHub Release with that CHANGELOG section as its notes.
+3. Publish: on GitHub **Actions → Release → Run workflow** with the version (or push a tag:
+   `git tag v1.1.0 origin/main && git push origin v1.1.0`). The *Release* workflow tags `main` and
+   publishes a GitHub Release with that CHANGELOG section as its notes.
 4. The version shows small on the title screen (bottom left) and under the phone's room-code box, so you
    can see at a glance which build a party is running.
 

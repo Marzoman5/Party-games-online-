@@ -40,7 +40,8 @@ computer connected to the TV and scan the QR code with phones — nothing to ins
 
 ### Project
 - `main` branch, pull-request CI (typecheck, builds, self-tests, Playwright for both transports),
-  automatic GitHub Pages deploy from `main`, GitHub Releases from version tags, `CONTRIBUTING.md`.
+  automatic GitHub Pages deploy from `main`, GitHub Releases from a version tag or a "Run workflow" button,
+  `CONTRIBUTING.md`.
 - WebRTC end-to-end suite with local signalling stand-ins (no test depends on a public service).
 - Live check after every deploy (`.github/workflows/live-check.yml`, also `npm run test:live`): joins and
   plays every game on the deployed site through the real public signalling services.
