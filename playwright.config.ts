@@ -65,6 +65,8 @@ export default defineConfig({
       use: {
         baseURL: process.env.KP_LIVE_URL ? new URL(process.env.KP_LIVE_URL).origin : undefined,
         proxy: PROXY,
+        // Real public services can misbehave: keep a trace of any failure to see exactly what happened.
+        trace: 'retain-on-failure' as const,
         launchOptions: { args: [...chromiumArgs, '--disable-features=WebRtcHideLocalIpsWithMdns'] },
       },
     }]),

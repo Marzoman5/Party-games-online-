@@ -8,7 +8,7 @@
  */
 import { expect, test } from '@playwright/test';
 import { collectErrors } from '../helpers';
-import { BASE, hostState, joinPhone, lobbyReady, newPhonePage, openRtcHost, phoneState, sigQuery, waitHost, waitPhone } from './rtcHelpers';
+import { BASE, hostState, joinPhone, lobbyReady, newPhonePage, openRtcHost, phoneState, sigQuery, toggleReady, waitHost, waitPhone } from './rtcHelpers';
 
 test('phone drops and comes back: same seat (playerId, name) via its saved token', async ({ page, browser }) => {
   const hostErrs = collectErrors(page, 'host');
@@ -63,10 +63,10 @@ test('host reload keeps the room: same code, same players, phones reconnect by t
     expect((await hostState(page)).players.map((p) => p.playerId).sort()).toEqual([...ids].sort());
     const errs = collectErrors(page, 'host after reload');
     // Messages flow again after the reload: Ana's ready toggle reaches the new page.
-    await waitPhone(a, `p.screen === 'lobby'`, 20_000);
+    // Tap only once the phone shows the reloaded host's view (a reload resets READY).
     const was = (await hostState(page)).players.find((p) => p.name === 'Ana')!.ready;
-    await a.getByTestId('btn-ready').tap();
-    await waitHost(page, `s.players.some(p => p.name === 'Ana' && p.ready === ${!was})`, 20_000);
+    await waitPhone(a, `p.connected && p.screen === 'lobby' && !!p.you && p.you.ready === ${was}`, 20_000);
+    await toggleReady(a, page, 'Ana', !was);
     errs.expectNone();
   } finally {
     await a.context().close();
@@ -96,10 +96,10 @@ test('second host tab takes the room over; the first can take it back', async ({
     await waitHost(page, `s.net === 'replaced'`, 20_000);
     await expect(page.locator('.kp-replaced.kp-on')).toBeVisible();
     // The phone is now driven by tab 2 (once it has rejoined it and shows the lobby again).
-    await waitPhone(phone, `p.connected && p.screen === 'lobby'`, 30_000);
+    // Tap only once the phone shows tab 2's view (it may still display tab 1's READY for a moment).
     const was = (await hostState(tab2)).players[0].ready;
-    await phone.getByTestId('btn-ready').tap();
-    await waitHost(tab2, `s.players[0].ready === ${!was}`, 20_000);
+    await waitPhone(phone, `p.connected && p.screen === 'lobby' && !!p.you && p.you.ready === ${was}`, 30_000);
+    await toggleReady(phone, tab2, 'Tom', !was);
 
     // Take it back from the first tab.
     await page.locator('.kp-replaced.kp-on button').first().click();

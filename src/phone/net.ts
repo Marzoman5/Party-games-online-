@@ -63,6 +63,8 @@ export class Net {
   private ws: Link | null = null;
   /** Ever joined in this page (a WebRTC "room not found" is then a host reload, not a typo). */
   private everJoined = false;
+  /** Fresh join: "room not found" is only believed after a second full attempt. */
+  private noRoomRetries = 0;
   private readonly openLink: (room: string) => Link =
     transportKind() === 'rtc' ? (room) => openRtcLink(room) : () => wsLink(wsUrl());
   private attempt = 0;
@@ -94,6 +96,7 @@ export class Net {
   connect(room: string): void {
     this.halted = false;
     this.attempt = 0;
+    this.noRoomRetries = 0;
     setState({ room, error: null, joined: false, phone: null, race: null, rush: null, hostConnected: true });
     this.open();
   }
@@ -222,6 +225,8 @@ export class Net {
         setState({ hostConnected: false });
         return false;
       }
+      // One more full attempt first: a signalling service may have been slow to connect on either end.
+      if (this.noRoomRetries++ < 1) return false;
       this.stop({ t: 'error', code: 'no_room', message: `Room ${state.room} not found. Check the code on the TV.` });
       return true;
     }

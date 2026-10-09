@@ -68,8 +68,13 @@ export function openRtcLink(room: string): Link {
   const hostId = hostPeerId(room);
   const peer = new RtcPeer(randomId(), cfg.iceServers);
   let done = false;
+  let answered = false;
   let timer = 0;
   let poll = 0;
+  let replay = 0;
+  /** Offer + candidates sent so far, and the services they went through. */
+  const sent: SignalMsg[] = [];
+  const reached = new Set<Signaller>();
 
   const link: Link = {
     get isOpen() {
@@ -90,6 +95,7 @@ export function openRtcLink(room: string): Link {
   const cleanup = (): void => {
     window.clearTimeout(timer);
     window.clearInterval(poll);
+    window.clearInterval(replay);
     listeners.delete(onSignal);
   };
 
@@ -102,12 +108,38 @@ export function openRtcLink(room: string): Link {
   };
 
   const sendAll = (m: SignalMsg): void => {
-    for (const s of signals) if (s.up) s.send(hostId, m);
+    if (sent.length < 64) sent.push(m);
+    for (const s of signals) {
+      if (!s.up) continue;
+      s.send(hostId, m);
+      reached.add(s);
+    }
+  };
+
+  /**
+   * A service that comes up (or back) while we wait for the answer gets everything sent so far: the
+   * host may be reachable only through it right now. The host ignores duplicates (same cid).
+   */
+  const replayToNewServices = (): void => {
+    if (done || answered) {
+      window.clearInterval(replay);
+      return;
+    }
+    for (const s of signals) {
+      if (!s.up) {
+        reached.delete(s);
+        continue;
+      }
+      if (reached.has(s)) continue;
+      reached.add(s);
+      for (const m of sent) s.send(hostId, m);
+    }
   };
 
   const onSignal = (from: string, m: SignalMsg): void => {
     if (done || from !== hostId || m.cid !== peer.cid) return;
     if (m.kind === 'answer' && m.sdp) {
+      answered = true;
       peer
         .acceptAnswer(m.sdp)
         .then((first) => {
@@ -141,6 +173,7 @@ export function openRtcLink(room: string): Link {
   const begin = (): void => {
     if (done) return;
     timer = window.setTimeout(() => fail({ code: RTC_CLOSE_NO_ROOM, reason: 'no answer' }), ANSWER_WAIT_MS);
+    replay = window.setInterval(replayToNewServices, 250);
     peer.makeOffer().catch(() => fail({ code: RTC_CLOSE_NO_DIRECT, reason: MSG_NO_DIRECT }));
   };
 

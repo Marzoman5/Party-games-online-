@@ -2,7 +2,7 @@
 // third-party service being up:
 //   - a real PeerJS server (the `peer` package, same code as 0.peerjs.com)  ws://127.0.0.1:<port>/peerjs?key=peerjs
 //   - a minimal Nostr relay (REQ / EVENT / CLOSE, `kinds` + `#t` filters; checks event ids and
-//     Schnorr signatures like real relays do)                                 ws://127.0.0.1:<port+1>
+//     Schnorr signatures like real relays do)                                 ws://127.0.0.1:<port+1>[/?delay=ms]
 //
 //   node scripts/signal-standins.mjs [--port 9000]
 //
@@ -33,7 +33,13 @@ const server = http.createServer((req, res) => {
   res.statusCode = 200;
   res.end('nostr stand-in');
 });
-const wss = new WebSocketServer({ server });
+// `?delay=<ms>` on the relay URL holds the connection that long first: lets tests make one service
+// come up later than the other on one side, like the real internet does.
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  const delay = Math.min(30_000, Number(new URL(req.url ?? '/', 'http://x').searchParams.get('delay')) || 0);
+  setTimeout(() => wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req)), delay);
+});
 /** ws -> Map<subId, filter> */
 const subs = new Map();
 

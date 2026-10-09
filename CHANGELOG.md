@@ -25,6 +25,9 @@ computer connected to the TV and scan the QR code with phones — nothing to ins
   configurable (`src/net/rtc/config.ts` or repository variables).
 - Same behaviour as the server: a dropped phone gets its seat back, reloading the host page keeps the
   room and its players, a second host tab takes the room over.
+- A phone's connection offer goes out through every signalling service as it comes up, and a first join
+  gets a second attempt, so a slow service is never mistaken for a wrong room code (found by the first live
+  check against the deployed site, before release).
 - Phones explain connection problems instead of spinning: blocked direct connection ("join the same
   Wi-Fi as the computer"), no signalling service ("you seem to be offline"), unknown room code.
 - Motion controls work on the website without any certificate step (it's HTTPS).

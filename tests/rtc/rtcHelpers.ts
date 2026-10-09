@@ -101,6 +101,7 @@ export interface PhoneDbg {
   view: string;
   hostConnected: boolean;
   error: { code: string; message: string } | null;
+  you: { ready: boolean; name: string } | null;
   transport: string;
   signals: Record<string, boolean>;
   game: string;
@@ -152,6 +153,25 @@ export async function lobbyReady(phone: Page, name: string, char: string): Promi
   await phone.getByTestId(`char-${char}`).tap();
   await expect(phone.getByTestId(`char-${char}`)).toHaveClass(/sel/);
   await phone.getByTestId('btn-ready').tap();
+}
+
+/**
+ * Toggle READY from the phone's lobby and wait for `host` to show `want`. Right after a reconnect the
+ * lobby re-renders, and a tap that lands mid-redraw is lost (a player just taps again): so does this.
+ */
+export async function toggleReady(phone: Page, host: Page, playerName: string, want: boolean): Promise<void> {
+  const pred = `s.players.some(p => p.name === ${JSON.stringify(playerName)} && p.ready === ${want})`;
+  for (let i = 0; i < 4; i++) {
+    await phone.getByTestId('btn-ready').tap();
+    try {
+      await waitHost(host, pred, 4000);
+      return;
+    } catch {
+      // still the old value: the tap was lost, tap again (only while the phone shows the old value too)
+      await waitPhone(phone, `!!p.you && p.you.ready === ${!want}`, 4000);
+    }
+  }
+  await waitHost(host, pred, 4000);
 }
 
 export async function tapTouch(cdp: CDPSession, phone: Page, testId: string, id: number, holdMs = 80): Promise<void> {
